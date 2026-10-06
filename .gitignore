@@ -28,3 +28,4 @@ data/onchain/31337/
 # web
 web/src/generated/
 web/next-env.d.ts
+.env*

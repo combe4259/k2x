@@ -31,7 +31,7 @@ const KIND_CONT = 0;
 const KIND_OPEN = 1;
 const KIND_CLOSE = 2;
 
-const HEARTBEAT = 180;
+const HEARTBEAT = 540; // under the live engine's 600 s staleness, ~3 MON a day on testnet
 const FAST = 10;
 const MIN_GAP = 4;
 const MOVE_BPS = 100;
