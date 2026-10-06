@@ -7,21 +7,21 @@ import { INSTANCES, addressUrl, type AssetKey, type InstanceKey } from "@/lib/co
 import { defaultInstance, useSnapshot, useTape } from "@/lib/data";
 
 const RULES = [
-  ["R0", "Sequence and clock", "Reports must be newer than the last one from that venue. On the live clock a report dated in the future, or more than a minute old, is refused — the move that made the Ostium exploit possible."],
+  ["R0", "Sequence and clock", "Reports must be newer than the last one from that venue. On the live clock a report dated in the future, or more than a minute old, is refused — the move that made the Ostium exploit possible. So is a report whose prices fall outside its own low–high, or an auction with more than one price."],
   ["R1", "Session", "NXT trades count only in its pre-market (08:00–08:50), main market (from 09:00:30) and after-market (15:30–20:00); KRX only from its 09:00 opening auction to the 15:30 close. Weekends, holidays and late opens such as exam day come from an on-chain calendar."],
-  ["R2", "Halts and VI", "During a trading halt or a volatility interruption the price freezes. The single-price auction that ends a VI starts a new warm-up."],
+  ["R2", "Halts and VI", "During a trading halt or a volatility interruption the price freezes. Trading that resumes after either one starts a new warm-up."],
   ["R3", "±30% band", "Korean stocks cannot trade beyond ±30% of the previous close, so nothing outside that band is ever accepted — even from a compromised relayer."],
   ["R4", "Warm-up", "A session's first prints are held until ₩100M and 20 trades have gone through. One share at the open is not a price."],
-  ["R5", "Confirmed jumps", "A move of more than 3% becomes a candidate. It is trusted only after ₩300M trades within 2% of it, across at least two windows, within a minute. Otherwise it is rejected."],
+  ["R5", "Confirmed jumps", "A move of more than 3% becomes a candidate. It is trusted only after ₩300M trades within 2% of it, across at least two windows, within a minute; at a session's start it also needs 20 trades. A thinner print elsewhere cannot overrule it. Otherwise it is rejected."],
   ["R7", "Staleness", "Without a fresh trusted price the market is shown as waiting, and requests simply wait for the next one."],
-  ["R8", "Official close", "The 15:30 closing auction sets the official close: the base for the next day's band and the moment every K2X token resets to 2x."],
+  ["R8", "Official close", "The 15:30 closing auction sets the official close, once a day: the base for the next day's band and the moment every K2X token resets to 2x."],
 ];
 
 export default function EnginePage() {
   const [instance, setInstance] = useState<InstanceKey>(defaultInstance);
   const [asset, setAsset] = useState<AssetKey>("hynix");
   const [filter, setFilter] = useState<"all" | "accepted" | "held" | "rejected">("all");
-  const { data: tape } = useTape(instance, asset, 4000, 3000n);
+  const { data: tape, error: tapeError } = useTape(instance, asset, 4000, 3000n);
   const { data: s } = useSnapshot(instance, asset);
   const rows = (tape ?? []).filter((r) => filter === "all" || r.verdict === filter);
   const inst = INSTANCES[instance];
@@ -71,7 +71,7 @@ export default function EnginePage() {
           ))}
         </div>
         <div className="mt-2">
-          <VerdictTape rows={rows} reference={s ? Number(s.basePx) : undefined} limit={40} />
+          <VerdictTape rows={rows} reference={s ? Number(s.basePx) : undefined} limit={40} error={tapeError} />
         </div>
       </section>
     </div>

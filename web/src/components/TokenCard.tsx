@@ -7,7 +7,7 @@ import { SESSION_TEXT, dirClass, krw, pct, units18 } from "@/lib/format";
 
 export function TokenCard({ asset, instance }: { asset: AssetKey; instance: InstanceKey }) {
   const a = ASSETS[asset];
-  const { data: s } = useSnapshot(instance, asset);
+  const { data: s, error } = useSnapshot(instance, asset);
   const move = s && s.px > 0n && s.basePx > 0n ? Number(s.px) / Number(s.basePx) - 1 : 0;
   const navMove = s ? Number(s.nav) / 1e18 / 10 - 1 : 0;
   return (
@@ -27,8 +27,12 @@ export function TokenCard({ asset, instance }: { asset: AssetKey; instance: Inst
         <div>
           <div className="eyebrow">Trusted price</div>
           <div className={`num mt-1 text-2xl ${dirClass(move)}`}>{s && s.px > 0n ? krw(s.px) : "—"}</div>
-          <div className={`num text-xs ${dirClass(move)}`}>
-            {s && s.px > 0n ? `${pct(move)} vs close ${krw(s.basePx)} → token ${pct(2 * move)}` : "waiting for first trusted price"}
+          <div className={`num text-xs ${!s && error ? "text-up" : dirClass(move)}`}>
+            {s && s.px > 0n
+              ? `${pct(move)} vs close ${krw(s.basePx)} → token ${pct(2 * move)}`
+              : !s && error
+                ? "can't reach the Monad RPC, retrying"
+                : "waiting for first trusted price"}
           </div>
         </div>
       </div>

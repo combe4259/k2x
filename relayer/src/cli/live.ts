@@ -10,7 +10,7 @@ const network = args[0] ?? "testnet";
 const minutes = Number(args[args.indexOf("--minutes") + 1] ?? 0) || 0;
 const interval = Number(args[args.indexOf("--interval") + 1] ?? 0) || 5;
 
-const { clients, chainId } = makeClients(network);
+const { clients, chainId } = makeClients(network, "LIVE_RELAYER_PRIVATE_KEY");
 const d: LiveDeployment = JSON.parse(readFileSync(join(ROOT, "deployments", `${chainId}.live.json`), "utf8"));
 const relayer = new LiveRelayer(clients, d.liveEngine, [
   { code: "000660", market: MARKETS.hynix, pool: d.hynixPool },

@@ -7,7 +7,7 @@ import { k2xPoolAbi } from "@k2x/relayer";
 import { AssetSwitch, InstanceSwitch } from "@/components/Switches";
 import { publicClient } from "@/lib/client";
 import { ASSETS, AUSD, INSTANCES, txUrl, type AssetKey, type InstanceKey } from "@/lib/config";
-import { defaultInstance, useSnapshot } from "@/lib/data";
+import { defaultInstance, requestExpiry, useSnapshot } from "@/lib/data";
 import { pct, usd18 } from "@/lib/format";
 import { useWallet } from "@/lib/wallet";
 
@@ -19,8 +19,9 @@ export default function PoolPage() {
   );
 }
 
-const CAP = 0.5;
-const LIMIT = 0.3;
+// pool defaults (K2XPool capBps / withdrawCapBps): share of LP equity a limit move may cost
+const MINT_CAP = 0.15;
+const WITHDRAW_CAP = 0.3;
 
 function Pool() {
   const params = useSearchParams();
@@ -35,8 +36,9 @@ function Pool() {
   const { data: s, refresh } = useSnapshot(instance, asset, 2500);
   const equity = s ? Number(s.equity) / 1e18 : 0;
   const exposure = s ? Number(s.exposure) / 1e18 : 0;
+  const liabilities = s ? Number(s.liabilities) / 1e18 : 0;
+  const stress = s ? Number(s.stressLoss) / 1e18 : 0;
   const util = s ? Number(s.utilizationBps) / 10_000 : 0;
-  const worstDay = exposure * LIMIT;
   const apr = s ? (Number(s.fundingRatePerSec) / 1e18) * 365 * 86400 : 0;
   const sharePrice = s && s.lpSupply > 0n ? equity / (Number(s.lpSupply) / 1e18) : 1;
 
@@ -53,21 +55,22 @@ function Pool() {
         </div>
       </div>
       <p className="mt-3 max-w-2xl text-ink-2">
-        Token holders&apos; claims come first; LPs own what is left. Exposure is capped at {CAP * 100}% of LP equity, so a
-        limit-up day (+30%) costs the pool at most {CAP * LIMIT * 100}% of its equity. Holders pay a funding rate that
-        rises with utilisation and is re-priced on every interaction.
+        Token holders&apos; claims come first; LPs own what is left. The pool loses when the stock rises, and the most it
+        can rise today is to its +30% daily limit. New mints stop once that move would cost LPs {MINT_CAP * 100}% of their
+        equity; LP withdrawals stop at {WITHDRAW_CAP * 100}%. After a sell-off there is more room left to the limit, so the
+        same holdings count for more. Holders pay a funding rate that rises with utilisation.
       </p>
 
       <section className="mt-6 grid gap-4 md:grid-cols-4">
         <Stat label="LP equity" value={`$${usd18(s?.equity ?? 0n)}`} sub={`share price ${sharePrice.toFixed(4)} AUSD`} />
         <Stat label="Owed to holders" value={`$${usd18(s?.liabilities ?? 0n)}`} sub="token supply × NAV" />
-        <Stat label="Leveraged exposure" value={`$${usd18(s?.exposure ?? 0n)}`} sub={`cap $${(equity * CAP).toLocaleString("en-US", { maximumFractionDigits: 0 })}`} />
+        <Stat label="Stock exposure" value={`$${usd18(s?.exposure ?? 0n)}`} sub="how much stock the pool is effectively short" />
         <Stat label="Funding rate" value={pct(apr, 2)} sub="a year, paid by holders to LPs" />
       </section>
 
       <section className="card mt-4 p-5">
         <div className="flex items-baseline justify-between">
-          <h2 className="display font-semibold">Exposure against the cap</h2>
+          <h2 className="display font-semibold">Loss at today&apos;s limit, against the mint cap</h2>
           <span className="num text-sm">{(util * 100).toFixed(1)}% used</span>
         </div>
         <div className="relative mt-4 h-4 overflow-hidden rounded-[3px] bg-tint">
@@ -75,16 +78,18 @@ function Pool() {
         </div>
         <div className="mt-2 flex justify-between text-xs text-ink-3">
           <span>0</span>
-          <span>new mints stop at 100%</span>
+          <span>
+            new mints stop at 100% (${(equity * MINT_CAP).toLocaleString("en-US", { maximumFractionDigits: 0 })})
+          </span>
         </div>
         <div className="mt-6 grid gap-4 md:grid-cols-3">
-          <Scenario label="Limit-up day (+30%)" loss={worstDay} equity={equity} />
-          <Scenario label="Worst 5 days of the last 2 years (+46%)" loss={exposure * 0.535} equity={equity} note="2x token +107% (4–11 May 2026)" />
-          <Scenario label="Required hedge" loss={exposure} equity={equity} hedge />
+          <Scenario label="Stock closes at today's +30% limit" loss={stress} equity={equity} />
+          <Scenario label="Worst 5 days of the last 2 years (+46%)" loss={liabilities * 1.07} equity={equity} note="2x token +107% (4–11 May 2026)" />
+          <Scenario label="Hedge that neutralises the pool" loss={exposure} equity={equity} hedge />
         </div>
         <p className="mt-4 text-xs text-ink-3">
           An unhedged pool is only safe at small size — SK hynix rose 408% in the last year. Larger pools assume LPs that
-          hedge on KRX or perps; the pool publishes its exposure every block so they can.
+          hedge on KRX or perps; every number here is read from the pool contract, so they can.
         </p>
       </section>
 
@@ -129,9 +134,20 @@ function LpActions({ instance, asset, onDone }: { instance: InstanceKey; asset: 
       const amt = parseUnits(amount, 6);
       const allowance = await publicClient.readContract({ address: AUSD, abi: erc20Abi, functionName: "allowance", args: [wallet.address, pool] });
       if (allowance < amt) await write({ address: AUSD, abi: erc20Abi, functionName: "approve", args: [pool, 2n ** 255n] });
-      const r = await write({ address: pool, abi: k2xPoolAbi, functionName: "requestDeposit", args: [amt, 0n, BigInt(Math.floor(Date.now() / 1000) + 30 * 86400)] });
+      // on the engine's clock: sandbox engines run a replay clock, not wall time
+      const expiry = await requestExpiry(instance, 30 * 86400);
+      const r = await write({ address: pool, abi: k2xPoolAbi, functionName: "requestDeposit", args: [amt, 0n, expiry] });
       setMsg({ text: "Deposit requested. It settles at the next trusted price.", tx: r.transactionHash });
-      if (instance === "sandbox") await fetch("/api/sandbox/step", { method: "POST", body: JSON.stringify({ minutes: 1 }) });
+      if (instance === "sandbox") {
+        const res = await fetch("/api/sandbox/step", { method: "POST", body: JSON.stringify({ minutes: 1 }) }).catch(() => null);
+        const body = res ? ((await res.json().catch(() => ({}))) as { error?: string }) : {};
+        if (!res?.ok) {
+          setMsg({
+            text: `Deposit requested. ${body.error ?? "The sandbox market did not move yet"}; it settles when the market next moves.`,
+            tx: r.transactionHash,
+          });
+        }
+      }
       onDone();
     } catch (e) {
       setMsg({ text: (e as Error).message.split("\n")[0] });

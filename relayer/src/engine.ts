@@ -53,10 +53,15 @@ export async function submitReports(
     const call = { address: engine, abi: kmarkEngineAbi, functionName: "submit", args: [report] } as const;
     const gas = await publicClient.estimateContractGas({ ...call, account: walletClient.account });
     const hash = await walletClient.writeContract({ ...call, gas: (gas * 115n) / 100n });
-    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    const receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 60_000 });
     if (receipt.status !== "success") throw new Error(`submit reverted: ${hash}`);
+    const decoded = decodeEngineLogs(receipt.logs, engine);
+    // a same-nonce replacement can resolve with someone else's receipt: only our own RawPrint counts
+    if (receipt.transactionHash !== hash || !decoded.some((e) => e.type === "raw")) {
+      throw new Error(`submit ${hash} was replaced or emitted no RawPrint`);
+    }
     receipts.push(receipt);
-    for (const e of decodeEngineLogs(receipt.logs, engine)) {
+    for (const e of decoded) {
       events.push(e);
       onEvent?.(e);
     }

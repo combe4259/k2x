@@ -12,12 +12,14 @@ import {K2XToken} from "./K2XToken.sol";
 /// @title K2XPool
 /// @notice AUSD liquidity pool that is the counterparty of one K2X leveraged token.
 ///         Every mint, redeem, LP deposit and LP withdrawal is a request that settles at the
-///         first trusted K-Mark price published after the request (forward pricing), so no one
-///         can trade against a stale or same-transaction price. Outside market hours requests
+///         first trusted K-Mark price formed entirely after the request (forward pricing), so no
+///         one can trade against a stale or same-transaction price. Outside market hours requests
 ///         simply wait for the next session's first trusted price.
-/// @dev    Token holders' claims (supply × NAV) are senior; LP equity is what remains.
-///         Leveraged exposure is capped relative to LP equity and holders pay a funding rate
-///         that is re-priced from pool utilisation on every interaction.
+/// @dev    Requests settle strictly in the order they were made, so each one sees the pool as the
+///         requests before it left it, and a daily reset is applied only after every request made
+///         before it has settled. Token holders' claims (supply × NAV) are senior; LP equity is
+///         what remains. The pool's loss if the stock runs to its daily limit is capped relative
+///         to LP equity, and holders pay a funding rate re-priced from that utilisation.
 contract K2XPool is ERC20, Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -51,6 +53,7 @@ contract K2XPool is ERC20, Ownable, ReentrancyGuard {
         uint64 createdAt; // engine time
         uint64 expiry; // engine time
         uint64 settledSeq;
+        uint64 scanSeq; // next price seq to check while pending
         uint128 amountIn; // AUSD (token decimals) for MINT/DEPOSIT, 18-dp units for REDEEM/WITHDRAW
         uint128 minOut;
         uint128 amountOut;
@@ -68,8 +71,9 @@ contract K2XPool is ERC20, Ownable, ReentrancyGuard {
         uint256 assets; // 1e18 AUSD, excludes pending escrow
         uint256 liabilities; // 1e18 AUSD
         int256 equity; // 1e18 AUSD
-        uint256 exposure; // 1e18 AUSD of leveraged exposure
-        uint256 utilizationBps; // exposure / cap
+        uint256 exposure; // 1e18 AUSD of stock exposure the pool is short (dollar delta)
+        uint256 stressLoss; // 1e18 AUSD the pool loses if the stock reaches today's limit against it
+        uint256 utilizationBps; // stressLoss / (equity × capBps)
         uint256 fundingRatePerSec;
         uint256 pendingRequests;
         uint32 baseDay;
@@ -78,6 +82,8 @@ contract K2XPool is ERC20, Ownable, ReentrancyGuard {
 
     uint256 internal constant BPS = 10_000;
     uint256 internal constant YEAR = 365 days;
+    uint256 internal constant MAX_SCAN = 16; // prices checked per request per call
+    uint256 internal constant MAX_CLOSES = 32; // daily resets applied per call
 
     IERC20 public immutable ausd;
     uint256 public immutable ausdScale; // 10 ** (18 - AUSD decimals)
@@ -86,12 +92,15 @@ contract K2XPool is ERC20, Ownable, ReentrancyGuard {
     K2XToken public token;
 
     uint16 public feeBps = 10; // 0.10% on mint and redeem, kept by LPs
-    uint16 public capBps = 5_000; // leveraged exposure ≤ 50% of LP equity
+    uint16 public capBps = 1_500; // mints stop when a limit move would cost LPs over 15% of equity
+    uint16 public withdrawCapBps = 3_000; // LP withdrawals stop at 30%, so LPs can leave a busy pool
+    uint256 public minRequest = 10e18; // 10 AUSD; smaller requests only to close out a balance
     uint256 public fundingBasePerSec = uint256(0.05e18) / YEAR; // 5% a year
     uint256 public fundingMaxPerSec = uint256(0.2e18) / YEAR; // 20% a year at full utilisation
 
     uint256 public pendingAusd; // escrowed AUSD of pending MINT / DEPOSIT requests
     uint256 public pendingCount;
+    uint256 public head; // requests before `head` are no longer pending
     Request[] internal _requests;
     mapping(address => uint256[]) internal _userRequests;
 
@@ -103,14 +112,15 @@ contract K2XPool is ERC20, Ownable, ReentrancyGuard {
     );
     event Refunded(uint256 indexed id, address indexed user, Kind kind, uint256 amountIn, RefundReason reason);
     event FundingUpdated(uint256 ratePerSec, uint256 utilizationBps);
-    event ParamsUpdated(uint16 feeBps, uint16 capBps, uint256 fundingBasePerSec, uint256 fundingMaxPerSec);
+    event ParamsUpdated(
+        uint16 feeBps, uint16 capBps, uint16 withdrawCapBps, uint256 minRequest, uint256 fundingBasePerSec, uint256 fundingMaxPerSec
+    );
 
     error AlreadyInitialized();
     error WrongPool();
     error NotSeeded();
-    error ZeroAmount();
+    error TooSmall();
     error NotPending();
-    error NoNewPrice();
     error NotExpired();
     error SettleInstead();
     error BadParams();
@@ -142,76 +152,94 @@ contract K2XPool is ERC20, Ownable, ReentrancyGuard {
         token_.accrue(c.at, fundingBasePerSec);
     }
 
-    function setParams(uint16 feeBps_, uint16 capBps_, uint256 basePerSec, uint256 maxPerSec) external onlyOwner {
-        if (feeBps_ > 100 || capBps_ == 0 || capBps_ > BPS || basePerSec > maxPerSec) revert BadParams();
+    function setParams(
+        uint16 feeBps_,
+        uint16 capBps_,
+        uint16 withdrawCapBps_,
+        uint256 minRequest_,
+        uint256 basePerSec,
+        uint256 maxPerSec
+    ) external onlyOwner {
+        if (feeBps_ > 100 || capBps_ == 0 || withdrawCapBps_ < capBps_ || withdrawCapBps_ > BPS || basePerSec > maxPerSec) {
+            revert BadParams();
+        }
         feeBps = feeBps_;
         capBps = capBps_;
+        withdrawCapBps = withdrawCapBps_;
+        minRequest = minRequest_;
         fundingBasePerSec = basePerSec;
         fundingMaxPerSec = maxPerSec;
-        emit ParamsUpdated(feeBps_, capBps_, basePerSec, maxPerSec);
+        emit ParamsUpdated(feeBps_, capBps_, withdrawCapBps_, minRequest_, basePerSec, maxPerSec);
     }
 
     // ─────────────────────────────── Requests ───────────────────────────────
 
     function requestMint(uint128 ausdIn, uint128 minTokensOut, uint64 expiry) external nonReentrant returns (uint256) {
-        if (ausdIn == 0) revert ZeroAmount();
+        if (uint256(ausdIn) * ausdScale < minRequest) revert TooSmall();
         ausd.safeTransferFrom(msg.sender, address(this), ausdIn);
         pendingAusd += ausdIn;
         return _push(Kind.MINT, ausdIn, minTokensOut, expiry);
     }
 
     function requestRedeem(uint128 tokensIn, uint128 minAusdOut, uint64 expiry) external nonReentrant returns (uint256) {
-        if (tokensIn == 0) revert ZeroAmount();
+        uint256 bal = token.balanceOf(msg.sender);
+        if (tokensIn == 0 || (uint256(tokensIn) * token.navBase() / 1e18 < minRequest && tokensIn != bal)) revert TooSmall();
         token.pull(msg.sender, tokensIn);
         return _push(Kind.REDEEM, tokensIn, minAusdOut, expiry);
     }
 
     function requestDeposit(uint128 ausdIn, uint128 minSharesOut, uint64 expiry) external nonReentrant returns (uint256) {
-        if (ausdIn == 0) revert ZeroAmount();
+        if (uint256(ausdIn) * ausdScale < minRequest) revert TooSmall();
         ausd.safeTransferFrom(msg.sender, address(this), ausdIn);
         pendingAusd += ausdIn;
         return _push(Kind.DEPOSIT, ausdIn, minSharesOut, expiry);
     }
 
     function requestWithdraw(uint128 sharesIn, uint128 minAusdOut, uint64 expiry) external nonReentrant returns (uint256) {
-        if (sharesIn == 0) revert ZeroAmount();
+        if (sharesIn == 0 || (sharesIn < minRequest && sharesIn != balanceOf(msg.sender))) revert TooSmall();
         _transfer(msg.sender, address(this), sharesIn);
         return _push(Kind.WITHDRAW, sharesIn, minAusdOut, expiry);
     }
 
-    /// @notice Settle a request at the first trusted price after it was made. Anyone may call.
-    function settle(uint256 id) external nonReentrant returns (bool) {
-        return _settle(id);
-    }
-
-    /// @notice Keeper helper: settle every request in `ids` that can be settled now.
-    function settleMany(uint256[] calldata ids) external nonReentrant returns (uint256 settled) {
-        uint64 latestSeq = engine.priceSeq(market);
-        for (uint256 i; i < ids.length; ++i) {
-            Request storage q = _requests[ids[i]];
-            if (q.status != Status.PENDING || q.seq >= latestSeq) continue;
-            if (_settle(ids[i])) ++settled;
+    /// @notice Settle pending requests in the order they were made, looking at up to `max`
+    ///         requests. Stops at the first request whose price has not been published yet,
+    ///         since every later request is newer. Anyone may call.
+    function settleQueue(uint256 max) external nonReentrant returns (uint256 done) {
+        uint256 n = _requests.length;
+        uint256 i = head;
+        for (uint256 steps; i < n && steps < max; ++steps) {
+            Request storage q = _requests[i];
+            if (q.status == Status.PENDING) {
+                (bool found, uint64 useSeq) = _priceFor(q);
+                if (!found) break;
+                if (!_settleAt(i, q, useSeq)) break; // too many daily resets to apply in one call
+                ++done;
+            }
+            ++i;
         }
+        head = i;
     }
 
-    /// @notice Refund a request whose expiry passed before any trusted price arrived.
+    /// @notice Refund a request whose expiry passed before any price formed after it arrived.
     function cancel(uint256 id) external nonReentrant {
         Request storage q = _requests[id];
         if (q.status != Status.PENDING) revert NotPending();
         if (engine.currentTime() <= q.expiry) revert NotExpired();
-        if (engine.priceSeq(market) > q.seq) {
-            KMarkEngine.PricePoint memory p = engine.priceAt(market, q.seq + 1);
-            if (p.at <= q.expiry) revert SettleInstead();
-        }
+        (bool found, uint64 useSeq) = _priceFor(q);
+        if (found && engine.priceAt(market, useSeq).at <= q.expiry) revert SettleInstead();
+        if (!found && q.scanSeq <= engine.priceSeq(market)) revert SettleInstead(); // not fully scanned yet
         _refund(id, q, RefundReason.EXPIRED);
     }
 
     /// @notice Apply official closes (daily leverage reset) and re-price funding. Anyone may call.
+    /// @dev    A close is applied only once every request made before it has settled, so no
+    ///         request can be moved from its own price to a later close.
     function sync() external nonReentrant {
-        uint64 seq = engine.priceSeq(market);
-        _applyClosesUpTo(seq);
-        if (seq == 0) return;
-        KMarkEngine.PricePoint memory p = engine.priceAt(market, seq);
+        uint64 latestSeq = engine.priceSeq(market);
+        bool idle = head == _requests.length;
+        _applyClosesUpTo(idle ? latestSeq : _requests[head].seq);
+        if (!idle || latestSeq == 0) return;
+        KMarkEngine.PricePoint memory p = engine.priceAt(market, latestSeq);
         token.accrue(p.at, token.fundingRatePerSec());
         _updateFunding(p.px, p.at);
     }
@@ -249,14 +277,15 @@ contract K2XPool is ERC20, Ownable, ReentrancyGuard {
         (s.px, s.priceAt, s.priceSeq, s.session, s.stale) = engine.latest(market);
         uint64 t = engine.currentTime();
         if (t < s.priceAt) t = s.priceAt;
-        s.nav = s.px == 0 ? token.navBase() : token.navAt(s.px, t);
+        uint64 px = s.px == 0 ? token.basePx() : s.px;
+        s.nav = token.navAt(px, t);
         s.tokenSupply = token.totalSupply();
         s.lpSupply = totalSupply();
         s.assets = (ausd.balanceOf(address(this)) - pendingAusd) * ausdScale;
         s.liabilities = s.tokenSupply * s.nav / 1e18;
         s.equity = int256(s.assets) - int256(s.liabilities);
-        s.exposure = _exposure(s.liabilities);
-        s.utilizationBps = _utilization(s.assets, s.liabilities);
+        (s.exposure, s.stressLoss) = _risk(s.tokenSupply, px, t);
+        s.utilizationBps = _utilization(s.assets, s.liabilities, s.stressLoss);
         s.fundingRatePerSec = token.fundingRatePerSec();
         s.pendingRequests = pendingCount;
         s.baseDay = token.baseDay();
@@ -277,6 +306,7 @@ contract K2XPool is ERC20, Ownable, ReentrancyGuard {
                 createdAt: engine.currentTime(),
                 expiry: expiry,
                 settledSeq: 0,
+                scanSeq: seq + 1,
                 amountIn: amountIn,
                 minOut: minOut,
                 amountOut: 0
@@ -287,33 +317,40 @@ contract K2XPool is ERC20, Ownable, ReentrancyGuard {
         emit Requested(id, msg.sender, k, amountIn, minOut, seq, expiry);
     }
 
-    function _settle(uint256 id) internal returns (bool ok) {
-        Request storage q = _requests[id];
-        if (q.status != Status.PENDING) revert NotPending();
-        uint64 useSeq = q.seq + 1;
-        if (useSeq > engine.priceSeq(market)) revert NoNewPrice();
+    /// @dev First price at or after seq + 1 that was formed entirely after the request, or the
+    ///      first price past the request's expiry. Progress is kept in `scanSeq`.
+    function _priceFor(Request storage q) internal returns (bool found, uint64 useSeq) {
+        uint64 latestSeq = engine.priceSeq(market);
+        uint64 s = q.scanSeq;
+        for (uint256 k; s <= latestSeq && k < MAX_SCAN; ++k) {
+            KMarkEngine.PricePoint memory p = engine.priceAt(market, s);
+            if (p.from >= q.createdAt || p.at > q.expiry) return (true, s);
+            ++s;
+        }
+        q.scanSeq = s;
+    }
 
-        // daily resets that happened up to the settlement price must be applied first
-        _applyClosesUpTo(useSeq);
-        uint64 baseSeq = token.baseSeq();
-        if (useSeq < baseSeq) useSeq = baseSeq; // NAV is continuous across a reset
-
+    /// @return false if daily resets up to `useSeq` could not all be applied in this call
+    function _settleAt(uint256 id, Request storage q, uint64 useSeq) internal returns (bool) {
         KMarkEngine.PricePoint memory p = engine.priceAt(market, useSeq);
         q.settledSeq = useSeq;
         if (p.at > q.expiry) {
             _refund(id, q, RefundReason.EXPIRED);
-            return false;
+            return true;
         }
+        // daily resets up to the settlement price come first; NAV is continuous across a reset
+        if (!_applyClosesUpTo(useSeq)) return false;
 
         token.accrue(p.at, token.fundingRatePerSec());
         uint256 nav = token.navAt(p.px, p.at);
 
-        if (q.kind == Kind.MINT) ok = _settleMint(id, q, p, nav);
-        else if (q.kind == Kind.REDEEM) ok = _settleRedeem(id, q, p, nav);
-        else if (q.kind == Kind.DEPOSIT) ok = _settleDeposit(id, q, p);
-        else ok = _settleWithdraw(id, q, p);
+        if (q.kind == Kind.MINT) _settleMint(id, q, p, nav);
+        else if (q.kind == Kind.REDEEM) _settleRedeem(id, q, p, nav);
+        else if (q.kind == Kind.DEPOSIT) _settleDeposit(id, q, p);
+        else _settleWithdraw(id, q, p);
 
         _updateFunding(p.px, p.at);
+        return true;
     }
 
     function _settleMint(uint256 id, Request storage q, KMarkEngine.PricePoint memory p, uint256 nav)
@@ -328,11 +365,11 @@ contract K2XPool is ERC20, Ownable, ReentrancyGuard {
 
         (uint256 assets,) = _balances(p.px, p.at);
         uint256 assetsAfter = assets + in18;
-        uint256 liabAfter = (token.totalSupply() + out) * nav / 1e18;
+        uint256 supplyAfter = token.totalSupply() + out;
+        uint256 liabAfter = supplyAfter * nav / 1e18;
         if (assetsAfter <= liabAfter) return _refund(id, q, RefundReason.CAP);
-        if (_exposure(liabAfter) * BPS > (assetsAfter - liabAfter) * capBps) {
-            return _refund(id, q, RefundReason.CAP);
-        }
+        (, uint256 stress) = _risk(supplyAfter, p.px, p.at);
+        if (stress * BPS > (assetsAfter - liabAfter) * capBps) return _refund(id, q, RefundReason.CAP);
 
         pendingAusd -= q.amountIn;
         _close(q, out);
@@ -386,7 +423,8 @@ contract K2XPool is ERC20, Ownable, ReentrancyGuard {
         if (assets <= liab) return _refund(id, q, RefundReason.INSOLVENT);
         uint256 equity = assets - liab;
         uint256 out18 = shares * equity / totalSupply();
-        if (_exposure(liab) * BPS > (equity - out18) * capBps) return _refund(id, q, RefundReason.CAP);
+        (, uint256 stress) = _risk(token.totalSupply(), p.px, p.at);
+        if (stress * BPS > (equity - out18) * withdrawCapBps) return _refund(id, q, RefundReason.CAP);
         uint256 out = out18 / ausdScale;
         if (out < q.minOut) return _refund(id, q, RefundReason.SLIPPAGE);
 
@@ -420,15 +458,18 @@ contract K2XPool is ERC20, Ownable, ReentrancyGuard {
 
     // ─────────────────────────────── Accounting ───────────────────────────────
 
-    function _applyClosesUpTo(uint64 seq) internal {
+    /// @return caughtUp true when every close up to `seq` has been applied
+    function _applyClosesUpTo(uint64 seq) internal returns (bool caughtUp) {
         uint256 n = engine.closeCount(market);
         uint256 idx = token.closeIdx();
-        for (uint256 steps; idx + 1 < n && steps < 32; ++steps) {
+        for (uint256 steps; idx + 1 < n; ++steps) {
             KMarkEngine.CloseRec memory c = engine.closeAt(market, idx + 1);
-            if (c.seq > seq) break;
+            if (c.seq > seq) return true;
+            if (steps == MAX_CLOSES) return false;
             token.rebase(c.px, c.seq, c.at, c.day, idx + 1);
             ++idx;
         }
+        return true;
     }
 
     function _balances(uint64 px, uint64 t) internal view returns (uint256 assets, uint256 liab) {
@@ -436,23 +477,34 @@ contract K2XPool is ERC20, Ownable, ReentrancyGuard {
         liab = token.totalSupply() * token.navAt(px, t) / 1e18;
     }
 
-    function _exposure(uint256 liab) internal view returns (uint256) {
+    /// @notice The pool's price risk for `supply` tokens at KRW price `px` and time `t`.
+    /// @return exposure dollar value of the stock position the pool is effectively short
+    /// @return stress   what the pool loses if the stock moves to today's daily limit against it
+    function _risk(uint256 supply, uint64 px, uint64 t) internal view returns (uint256 exposure, uint256 stress) {
         int256 lev = token.leverage();
         uint256 absLev = uint256(lev >= 0 ? lev : -lev);
-        return liab * absLev / 1e18;
+        uint256 basePx = token.basePx();
+        // d(liabilities)/d(price) is constant between resets: L × supply × navBase × funding / P0
+        uint256 perPx = supply * token.navBase() / 1e18 * token.factorAt(t) / 1e18 * absLev / 1e18;
+        exposure = perPx * px / basePx;
+        (uint16 bandBps,,,,,,,,,,) = engine.params();
+        uint256 limit = lev >= 0 ? basePx * (BPS + bandBps) / BPS : basePx * (BPS - bandBps) / BPS;
+        uint256 move = lev >= 0 ? (limit > px ? limit - px : 0) : (px > limit ? px - limit : 0);
+        stress = perPx * move / basePx;
     }
 
-    function _utilization(uint256 assets, uint256 liab) internal view returns (uint256) {
+    function _utilization(uint256 assets, uint256 liab, uint256 stress) internal view returns (uint256) {
         if (assets <= liab) return BPS;
-        uint256 capExposure = (assets - liab) * capBps / BPS;
-        if (capExposure == 0) return BPS;
-        uint256 u = _exposure(liab) * BPS / capExposure;
+        uint256 room = (assets - liab) * capBps / BPS;
+        if (room == 0) return BPS;
+        uint256 u = stress * BPS / room;
         return u > BPS ? BPS : u;
     }
 
     function _updateFunding(uint64 px, uint64 t) internal {
         (uint256 assets, uint256 liab) = _balances(px, t);
-        uint256 util = _utilization(assets, liab);
+        (, uint256 stress) = _risk(token.totalSupply(), px, t);
+        uint256 util = _utilization(assets, liab, stress);
         uint256 rate = fundingBasePerSec + (fundingMaxPerSec - fundingBasePerSec) * util / BPS;
         token.accrue(t, rate);
         emit FundingUpdated(rate, util);

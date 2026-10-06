@@ -7,8 +7,8 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 /// @notice On-chain price judge for Korean equities. Relayers post per-window trade
 ///         summaries from KRX and NXT. The engine decides, by Korean market rules,
 ///         which prices are trustworthy and emits the reason for every decision.
-/// @dev    Rules (see docs): R0 sequencing/time, R1 session, R2 halt/VI, R3 ±30% band,
-///         R4 warm-up, R5 jump confirmation, R7 staleness (view), R8 official close.
+/// @dev    Rules: R0 sequencing/time/well-formed report, R1 session, R2 halt/VI, R3 ±30% band,
+///         R4 warm-up, R5 jump confirmation, R7 staleness (view), R8 official close (one per day).
 contract KMarkEngine is Ownable {
     // ─────────────────────────────── Types ───────────────────────────────
 
@@ -45,7 +45,9 @@ contract KMarkEngine is Ownable {
         VI_HOLD, // volatility interruption in progress
         HALT, // trading halt
         THIN_AUCTION, // auction print with too little volume
-        NO_BASE // no reference close for the band
+        NO_BASE, // no reference close for the band
+        MALFORMED, // prices out of order (low ≤ first, last, vwap ≤ high), or an auction with more than one price
+        AUCTION_DONE // today's opening or closing auction price is already set
     }
 
     uint8 public constant VENUE_KRX = 1;
@@ -91,9 +93,13 @@ contract KMarkEngine is Ownable {
         uint128 auctionMinNotional; // KRW an auction print needs to be trusted
     }
 
+    /// @dev `from` is the earliest trade the price can contain: the window start for continuous
+    ///      trading, the match time for an auction. Pools settle a request only at a price formed
+    ///      entirely after the request (from ≥ request time).
     struct PricePoint {
         uint64 px;
         uint64 at;
+        uint64 from;
         uint32 day;
         bool isClose;
     }
@@ -114,6 +120,8 @@ contract KMarkEngine is Ownable {
         uint32 segTrades;
         uint32 viEpoch;
         uint32 candWindows;
+        uint32 candTrades;
+        uint32 openDay; // KST day whose opening auction price is set
         uint64 trustedPx;
         uint64 trustedAt;
         uint64 priceSeq;
@@ -184,6 +192,10 @@ contract KMarkEngine is Ownable {
     error UnknownMarket();
     error EmptyReport();
     error AlreadySeeded();
+    error CloseExists();
+    error NotTradingDay();
+    error TooEarly();
+    error OutOfBand();
 
     constructor(ClockMode mode_, address owner_) Ownable(owner_) {
         mode = mode_;
@@ -216,6 +228,31 @@ contract KMarkEngine is Ownable {
         uint64 at = uint64(uint256(day) * 1 days + uint256(CLOSE_T) - KST_OFFSET);
         _closes[market].push(CloseRec({px: px, at: at, seq: _markets[market].priceSeq, day: day}));
         emit CloseSet(market, day, px, _markets[market].priceSeq);
+    }
+
+    /// @notice R8 fallback: record the official close of a past trading day the relayer missed,
+    ///         so the band and the daily reset do not stay on an older close. Bounded by that
+    ///         day's ±30% band and allowed only after the closing auction's grace period.
+    function recordClose(bytes32 market, uint32 day, uint64 px) external onlyOwner {
+        MarketState storage m = _markets[market];
+        if (!m.listed) revert UnknownMarket();
+        CloseRec[] storage cs = _closes[market];
+        if (cs.length == 0 || cs[cs.length - 1].day >= day) revert CloseExists();
+        if (!isTradingDay(day)) revert NotTradingDay();
+        uint64 at = uint64(int64(uint64(day) * 1 days) + int64(CLOSE_T) + dayShift[day] - int64(int256(KST_OFFSET)));
+        if (currentTime() < uint256(at) + uint256(AUCTION_GRACE)) revert TooEarly();
+        if (!_inBand(px, _bandBase(market, day), params.bandBps)) revert OutOfBand();
+
+        uint64 seq = ++m.priceSeq;
+        _prices[market][seq] = PricePoint({px: px, at: at, from: at, day: day, isClose: true});
+        if (m.trustedAt <= at) {
+            m.trustedPx = px;
+            m.trustedAt = at;
+            m.trustedDay = day;
+        }
+        emit PriceAccepted(market, seq, px, at, VENUE_KRX, KIND_CLOSE_AUCTION);
+        cs.push(CloseRec({px: px, at: at, seq: seq, day: day}));
+        emit CloseSet(market, day, px, seq);
     }
 
     function setRelayer(address who, bool allowed) external onlyOwner {
@@ -252,14 +289,18 @@ contract KMarkEngine is Ownable {
     function sessionAt(uint64 ts) public view returns (Session s, uint32 day, int256 sod) {
         day = kstDay(ts);
         sod = int256((uint256(ts) + KST_OFFSET) % 1 days) - int256(dayShift[day]);
-        uint32 weekday = (day + 3) % 7; // 0 = Monday
-        if (weekday >= 5 || holiday[day]) return (Session.CLOSED, day, sod);
+        if (!isTradingDay(day)) return (Session.CLOSED, day, sod);
         if (sod >= PRE_START && sod < PRE_END) s = Session.NXT_PRE;
         else if (sod >= PRE_END && sod < OPEN_T) s = Session.AUCTION_WAIT;
         else if (sod >= OPEN_T && sod < CONT_END) s = Session.CONTINUOUS;
         else if (sod >= CONT_END && sod < CLOSE_T) s = Session.CLOSE_AUCTION;
         else if (sod >= CLOSE_T && sod < AFTER_END) s = Session.NXT_AFTER;
         else s = Session.CLOSED;
+    }
+
+    function isTradingDay(uint32 day) public view returns (bool) {
+        uint32 weekday = (day + 3) % 7; // 0 = Monday
+        return weekday < 5 && !holiday[day];
     }
 
     // ─────────────────────────────── Core ───────────────────────────────
@@ -282,9 +323,9 @@ contract KMarkEngine is Ownable {
         if (mode == ClockMode.LIVE) {
             if (t > block.timestamp + p.maxFutureSkew) return _reject(r, Reason.FUTURE_TIMESTAMP, r.vwapPx, t);
             if (uint256(t) + p.maxReportAge < block.timestamp) return _reject(r, Reason.TOO_OLD, r.vwapPx, t);
-        } else if (t > clock) {
-            clock = t;
         }
+        if (!_wellFormed(r)) return _reject(r, Reason.MALFORMED, r.vwapPx, t);
+        if (mode == ClockMode.REPLAY && t > clock) clock = t;
         if (r.venue == VENUE_KRX) m.lastKrxAt = t;
         else m.lastNxtAt = t;
 
@@ -301,7 +342,11 @@ contract KMarkEngine is Ownable {
             _clearCandidate(m);
             return _hold(r, Reason.HALT, r.vwapPx, t);
         }
-        m.halted = false;
+        if (m.halted) {
+            // trading resumes through a single-price auction: price discovery starts over, as after a VI
+            m.halted = false;
+            m.viEpoch++;
+        }
         if (r.flags & FLAG_VI != 0) {
             m.viHold = true;
             _clearCandidate(m);
@@ -314,14 +359,11 @@ contract KMarkEngine is Ownable {
         }
 
         // R3 — ±30% daily limit band around the trading day's base price
+        // (low ≤ every price ≤ high is checked above, so the whole report is inside the band)
         uint64 base = _bandBase(r.market, day);
         if (base == 0) return _reject(r, Reason.NO_BASE, r.vwapPx, t);
-        {
-            uint256 lo = uint256(base) * (BPS - p.bandBps) / BPS;
-            uint256 hi = uint256(base) * (BPS + p.bandBps) / BPS;
-            if (r.lowPx < lo || r.highPx > hi || r.vwapPx < lo || r.vwapPx > hi) {
-                return _reject(r, Reason.BAND, r.vwapPx, t);
-            }
+        if (!_inBand(r.lowPx, base, p.bandBps) || !_inBand(r.highPx, base, p.bandBps)) {
+            return _reject(r, Reason.BAND, r.vwapPx, t);
         }
 
         // segment bookkeeping (warm-up restarts per session segment and after each VI)
@@ -334,15 +376,18 @@ contract KMarkEngine is Ownable {
             _clearCandidate(m);
         }
 
-        // R8 — auction prints (deep single-price auctions) are trusted on their own
+        // R8 — auction prints (deep single-price auctions) are trusted on their own, once a day each
         if (r.kind == KIND_OPEN_AUCTION || r.kind == KIND_CLOSE_AUCTION) {
+            bool done = r.kind == KIND_OPEN_AUCTION ? m.openDay == day : _lastCloseDay(r.market) >= day;
+            if (done) return _reject(r, Reason.AUCTION_DONE, r.lastPx, t);
             if (r.notional < p.auctionMinNotional) return _hold(r, Reason.THIN_AUCTION, r.lastPx, t);
             m.segNotional += r.notional;
             m.segTrades += r.trades;
             m.segWarm = true;
             _clearCandidate(m);
-            uint64 seq = _accept(r, r.lastPx, t, day);
-            if (r.kind == KIND_CLOSE_AUCTION) _setClose(r.market, r.lastPx, t, seq, day);
+            uint64 seq = _accept(r, r.lastPx, t, t, day);
+            if (r.kind == KIND_OPEN_AUCTION) m.openDay = day;
+            else _setClose(r.market, r.lastPx, t, seq, day);
             return (Decision.ACCEPTED, Reason.NONE);
         }
 
@@ -352,23 +397,34 @@ contract KMarkEngine is Ownable {
 
         // R5 — a pending jump candidate is confirmed only by volume that keeps trading near it
         if (m.candPx != 0) {
+            bool open = t <= m.candAt + p.confirmWindow;
             bool sameSide = (px < ref) == (m.candPx < ref);
             bool near = _within(px, m.candPx, p.confirmBandBps);
-            if (jump && sameSide && near && t <= m.candAt + p.confirmWindow) {
+            if (jump && sameSide && near && open) {
                 m.candNotional += r.notional;
+                m.candTrades += r.trades;
                 m.candWindows += 1;
                 m.candPx = px;
                 m.segNotional += r.notional;
                 m.segTrades += r.trades;
-                if (m.candNotional >= p.confirmNotional && m.candWindows >= 2) {
+                // in a cold segment a jump also needs warm-up's trade count, so a couple of
+                // self-crossed trades cannot set the first price of the session
+                bool enough = m.candNotional >= p.confirmNotional && m.candWindows >= 2
+                    && (m.segWarm || m.candTrades >= p.warmupTrades);
+                if (enough) {
                     _clearCandidate(m);
                     m.segWarm = true;
-                    _accept(r, px, t, day);
+                    _accept(r, px, r.windowStart, t, day);
                     return (Decision.ACCEPTED, Reason.NONE);
                 }
                 return _hold(r, Reason.JUMP_PENDING, px, t);
             }
+            // a thinner print elsewhere cannot overrule a candidate still waiting for confirmation
+            if (open && r.notional < m.candNotional) return _hold(r, Reason.JUMP_PENDING, px, t);
             emit PriceRejected(r.market, Reason.JUMP_UNCONFIRMED, m.candPx, m.candAt, r.venue);
+            // the discarded candidate traded at another level, so it does not count toward warm-up
+            m.segNotional = m.segNotional > m.candNotional ? m.segNotional - m.candNotional : 0;
+            m.segTrades = m.segTrades > m.candTrades ? m.segTrades - m.candTrades : 0;
             _clearCandidate(m);
         }
 
@@ -379,6 +435,7 @@ contract KMarkEngine is Ownable {
             m.candPx = px;
             m.candAt = t;
             m.candNotional = r.notional;
+            m.candTrades = r.trades;
             m.candWindows = 1;
             return _hold(r, Reason.JUMP_PENDING, px, t);
         }
@@ -392,7 +449,7 @@ contract KMarkEngine is Ownable {
             }
         }
 
-        _accept(r, px, t, day);
+        _accept(r, px, r.windowStart, t, day);
         return (Decision.ACCEPTED, Reason.NONE);
     }
 
@@ -459,13 +516,31 @@ contract KMarkEngine is Ownable {
         return (uint64(day) << 32) | (seg << 24) | uint64(viEpoch & 0xFFFFFF);
     }
 
+    /// @dev The day's base is the latest official close of an earlier day (one close per day).
     function _bandBase(bytes32 market, uint32 day) internal view returns (uint64) {
         CloseRec[] storage cs = _closes[market];
-        uint256 n = cs.length;
-        if (n == 0) return 0;
-        if (cs[n - 1].day < day) return cs[n - 1].px;
-        if (n >= 2) return cs[n - 2].px;
+        for (uint256 i = cs.length; i > 0; --i) {
+            if (cs[i - 1].day < day) return cs[i - 1].px;
+        }
         return 0;
+    }
+
+    function _lastCloseDay(bytes32 market) internal view returns (uint32) {
+        CloseRec[] storage cs = _closes[market];
+        return cs.length == 0 ? 0 : cs[cs.length - 1].day;
+    }
+
+    function _wellFormed(Report calldata r) internal pure returns (bool) {
+        if (r.firstPx < r.lowPx || r.lastPx < r.lowPx || r.vwapPx < r.lowPx) return false;
+        if (r.firstPx > r.highPx || r.lastPx > r.highPx || r.vwapPx > r.highPx) return false;
+        // an auction matches every order at one price
+        if (r.kind == KIND_OPEN_AUCTION || r.kind == KIND_CLOSE_AUCTION) return r.lowPx == r.highPx;
+        return true;
+    }
+
+    function _inBand(uint64 px, uint64 base, uint16 bandBps) internal pure returns (bool) {
+        return base != 0 && uint256(px) * BPS >= uint256(base) * (BPS - bandBps)
+            && uint256(px) * BPS <= uint256(base) * (BPS + bandBps);
     }
 
     function _within(uint64 a, uint64 b, uint16 bps) internal pure returns (bool) {
@@ -477,16 +552,17 @@ contract KMarkEngine is Ownable {
         m.candPx = 0;
         m.candAt = 0;
         m.candNotional = 0;
+        m.candTrades = 0;
         m.candWindows = 0;
     }
 
-    function _accept(Report calldata r, uint64 px, uint64 t, uint32 day) internal returns (uint64 seq) {
+    function _accept(Report calldata r, uint64 px, uint64 from, uint64 t, uint32 day) internal returns (uint64 seq) {
         MarketState storage m = _markets[r.market];
         seq = ++m.priceSeq;
         m.trustedPx = px;
         m.trustedAt = t;
         m.trustedDay = day;
-        _prices[r.market][seq] = PricePoint({px: px, at: t, day: day, isClose: false});
+        _prices[r.market][seq] = PricePoint({px: px, at: t, from: from, day: day, isClose: false});
         emit PriceAccepted(r.market, seq, px, t, r.venue, r.kind);
     }
 

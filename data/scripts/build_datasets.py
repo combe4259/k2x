@@ -80,10 +80,11 @@ def build_pre_market_tape(
 
 
 def window_schedule(start: int, end: int) -> list[tuple[int, int]]:
-    """1s windows for the first minute, 10s until +5min, then 60s."""
+    """1s windows for the first 15s (where the incident happens), 5s until +1min, 30s until +5min,
+    then 5min. Each window is one on-chain report, so the schedule also sets the testnet gas bill."""
     out, t = [], start
     while t < end:
-        size = 1 if t < start + 60 else 10 if t < start + 300 else 60
+        size = 1 if t < start + 15 else 5 if t < start + 60 else 30 if t < start + 300 else 300
         out.append((t, min(t + size, end)))
         t += size
     return out

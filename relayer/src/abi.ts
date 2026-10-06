@@ -276,6 +276,25 @@ export const kmarkEngineAbi = [
   },
   {
     "type": "function",
+    "name": "isTradingDay",
+    "inputs": [
+      {
+        "name": "day",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "kstDay",
     "inputs": [
       {
@@ -403,6 +422,16 @@ export const kmarkEngineAbi = [
           },
           {
             "name": "candWindows",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "candTrades",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "openDay",
             "type": "uint32",
             "internalType": "uint32"
           },
@@ -582,6 +611,11 @@ export const kmarkEngineAbi = [
             "internalType": "uint64"
           },
           {
+            "name": "from",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
             "name": "day",
             "type": "uint32",
             "internalType": "uint32"
@@ -614,6 +648,29 @@ export const kmarkEngineAbi = [
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "recordClose",
+    "inputs": [
+      {
+        "name": "market",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "day",
+        "type": "uint32",
+        "internalType": "uint32"
+      },
+      {
+        "name": "px",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -1325,12 +1382,27 @@ export const kmarkEngineAbi = [
   },
   {
     "type": "error",
+    "name": "CloseExists",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "EmptyReport",
     "inputs": []
   },
   {
     "type": "error",
     "name": "NotRelayer",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotTradingDay",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OutOfBand",
     "inputs": []
   },
   {
@@ -1354,6 +1426,11 @@ export const kmarkEngineAbi = [
         "internalType": "address"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "TooEarly",
+    "inputs": []
   },
   {
     "type": "error",
@@ -1590,6 +1667,19 @@ export const k2xPoolAbi = [
   },
   {
     "type": "function",
+    "name": "head",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "initialize",
     "inputs": [
       {
@@ -1615,6 +1705,19 @@ export const k2xPoolAbi = [
         "name": "",
         "type": "bytes32",
         "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "minRequest",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -1825,6 +1928,11 @@ export const k2xPoolAbi = [
             "internalType": "uint64"
           },
           {
+            "name": "scanSeq",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
             "name": "amountIn",
             "type": "uint128",
             "internalType": "uint128"
@@ -1917,6 +2025,16 @@ export const k2xPoolAbi = [
         "internalType": "uint16"
       },
       {
+        "name": "withdrawCapBps_",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "minRequest_",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
         "name": "basePerSec",
         "type": "uint256",
         "internalType": "uint256"
@@ -1932,36 +2050,17 @@ export const k2xPoolAbi = [
   },
   {
     "type": "function",
-    "name": "settle",
+    "name": "settleQueue",
     "inputs": [
       {
-        "name": "id",
+        "name": "max",
         "type": "uint256",
         "internalType": "uint256"
       }
     ],
     "outputs": [
       {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "settleMany",
-    "inputs": [
-      {
-        "name": "ids",
-        "type": "uint256[]",
-        "internalType": "uint256[]"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "settled",
+        "name": "done",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -2035,6 +2134,11 @@ export const k2xPoolAbi = [
           },
           {
             "name": "exposure",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "stressLoss",
             "type": "uint256",
             "internalType": "uint256"
           },
@@ -2200,6 +2304,19 @@ export const k2xPoolAbi = [
     "stateMutability": "view"
   },
   {
+    "type": "function",
+    "name": "withdrawCapBps",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
     "type": "event",
     "name": "Approval",
     "inputs": [
@@ -2277,6 +2394,18 @@ export const k2xPoolAbi = [
         "type": "uint16",
         "indexed": false,
         "internalType": "uint16"
+      },
+      {
+        "name": "withdrawCapBps",
+        "type": "uint16",
+        "indexed": false,
+        "internalType": "uint16"
+      },
+      {
+        "name": "minRequest",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       },
       {
         "name": "fundingBasePerSec",
@@ -2557,11 +2686,6 @@ export const k2xPoolAbi = [
   },
   {
     "type": "error",
-    "name": "NoNewPrice",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "NotExpired",
     "inputs": []
   },
@@ -2620,12 +2744,12 @@ export const k2xPoolAbi = [
   },
   {
     "type": "error",
-    "name": "WrongPool",
+    "name": "TooSmall",
     "inputs": []
   },
   {
     "type": "error",
-    "name": "ZeroAmount",
+    "name": "WrongPool",
     "inputs": []
   }
 ] as const;

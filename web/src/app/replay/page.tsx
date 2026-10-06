@@ -16,12 +16,20 @@ const SCENARIOS = [
 ] as const;
 
 type ScenarioKey = (typeof SCENARIOS)[number]["key"];
+type Onchain = { events: EngineEvent[]; fromBlock: number; toBlock: number };
+
+// only scenarios replayed on this chain have K-Mark verdicts to show
+const ONCHAIN = replays as Record<string, Onchain | undefined>;
+const recorded = (key: string) => (ONCHAIN[key]?.events?.length ?? 0) > 0;
+const FIRST: ScenarioKey = recorded("2026-07-28_000660")
+  ? "2026-07-28_000660"
+  : (SCENARIOS.find((s) => recorded(s.key))?.key ?? "2026-07-28_000660");
 
 export default function ReplayPage() {
-  const [key, setKey] = useState<ScenarioKey>("2026-07-28_000660");
+  const [key, setKey] = useState<ScenarioKey>(FIRST);
   const [zoom, setZoom] = useState<"open" | "hour">("open");
   const ds = (datasets as Record<string, any>)[key];
-  const onchain = (replays as Record<string, any>)[key] as { events: EngineEvent[]; fromBlock: number; toBlock: number } | undefined;
+  const onchain = ONCHAIN[key];
   const events = onchain?.events ?? [];
   const prevClose: number = ds.seedClose.px;
   const t0: number = ds.reports[0].windowStart;
@@ -56,6 +64,8 @@ export default function ReplayPage() {
   const badPrint = events.find(
     (e): e is Verdict => e.type === "rejected" && "reason" in e && e.reason === "JUMP_UNCONFIRMED",
   );
+  // the bad print is held when it arrives and rejected by a later transaction: show the rejection at that one's window end
+  const rejectedAt = badPrint ? (raw.find((r) => r.txHash === badPrint.txHash)?.windowEnd ?? badPrint.at + 1) : Infinity;
 
   const rawSeries = useMemo<[number, number][]>(
     () => (raw.length ? raw : (ds.reports as { windowEnd: number; lastPx: number }[])).map((r) => [r.windowEnd, r.lastPx]),
@@ -82,15 +92,21 @@ export default function ReplayPage() {
       </p>
 
       <div className="mt-8 flex flex-wrap items-center gap-2">
-        {SCENARIOS.map((s) => (
-          <button
-            key={s.key}
-            onClick={() => setKey(s.key)}
-            className={`rounded-md border px-3 py-1.5 text-sm ${key === s.key ? "border-ink bg-ink text-sheet" : "border-rule text-ink-2"}`}
-          >
-            {s.label}
-          </button>
-        ))}
+        {SCENARIOS.map((s) =>
+          recorded(s.key) ? (
+            <button
+              key={s.key}
+              onClick={() => setKey(s.key)}
+              className={`rounded-md border px-3 py-1.5 text-sm ${key === s.key ? "border-ink bg-ink text-sheet" : "border-rule text-ink-2"}`}
+            >
+              {s.label}
+            </button>
+          ) : (
+            <button key={s.key} disabled className="rounded-md border border-dashed border-rule px-3 py-1.5 text-sm text-ink-3">
+              {s.short} · not recorded on this network
+            </button>
+          ),
+        )}
         <span className="mx-2 h-5 w-px bg-rule" />
         {(["open", "hour"] as const).map((z) => (
           <button
@@ -114,7 +130,11 @@ export default function ReplayPage() {
           ]}
           markers={
             badPrint && badPrint.at <= cursor && inView([badPrint.at, badPrint.px])
-              ? [{ t: badPrint.at, px: badPrint.px, color: "var(--rejected)", label: "rejected by K-Mark" }]
+              ? [
+                  rejectedAt <= cursor
+                    ? { t: badPrint.at, px: badPrint.px, color: "var(--rejected)", label: "rejected by K-Mark" }
+                    : { t: badPrint.at, px: badPrint.px, color: "var(--held)", label: "held by K-Mark" },
+                ]
               : []
           }
         />
@@ -167,7 +187,7 @@ export default function ReplayPage() {
           <Row label="Lowest trusted price" value={isFinite(trustedLow) ? krw(trustedLow) : "—"} move={isFinite(trustedLow) ? trustedLow / prevClose - 1 : 0} />
           <div className="mt-3 flex items-center justify-between gap-3 text-sm">
             <span className="text-ink-2">The {key === "2026-07-28_000660" ? "1-share" : "11-share"} print</span>
-            {badPrint && badPrint.at <= cursor - 1 ? (
+            {badPrint && rejectedAt <= cursor ? (
               <span className="flex items-center gap-2">
                 <Stamp verdict="rejected" small />
                 {txUrl(badPrint.txHash) && (
@@ -185,7 +205,9 @@ export default function ReplayPage() {
           <p className="mt-4 border-t border-rule pt-3 text-sm text-ink-2">
             {firstTrusted
               ? `The real gap was trusted ${firstTrusted.at - t0} seconds after the open, once ₩3억 traded near the new level. A time-window patch would have ignored it for ten minutes.`
-              : "Waiting for the on-chain replay."}
+              : onchain
+                ? "Waiting for the on-chain replay."
+                : "This scenario has not been replayed on this network."}
           </p>
         </div>
       </div>

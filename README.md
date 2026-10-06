@@ -30,7 +30,7 @@ K2X answers both with market structure, not time windows:
 
 | Page | What it shows |
 | --- | --- |
-| [Replay 7/28](https://k2x-delta.vercel.app/replay) | The 7/28 pre-market replayed through K-Mark **on Monad testnet**. The 1-share print at 1,272,000 is held, then rejected (`JUMP_UNCONFIRMED`), while the real −6% gap is accepted four seconds later. Every verdict links to its transaction. |
+| [Replay 7/28](https://k2x-delta.vercel.app/replay) | The 7/28 pre-market replayed through K-Mark **on Monad testnet**. The 1-share print at 1,272,000 is held, then rejected (`JUMP_UNCONFIRMED`), while the real −6% gap is accepted six seconds later, once ₩300M and 20 trades confirm it. Every verdict links to its transaction. |
 | [Live](https://k2x-delta.vercel.app) | Real SK hynix and Samsung trades from KRX and NXT, judged on-chain during Korean hours (08:00–20:00 KST, weekdays). Outside those hours the home page shows the sandbox. |
 | [Mint & redeem](https://k2x-delta.vercel.app/trade) | Request, wait for the next trusted price, settle. The sandbox instance replays the real KRX session of 2026-10-02 minute by minute so this works at any hour. |
 | [LP pool](https://k2x-delta.vercel.app/pool) | Pool equity, holder liabilities, exposure cap, utilisation and funding. |
@@ -74,14 +74,20 @@ Three engine instances run on testnet:
 
 | Contract | Address |
 | --- | --- |
-| Mock AUSD | [`0x416aeEC7F19fb613cECE986c3FB046D84BFa6451`](https://testnet.monadvision.com/address/0x416aeEC7F19fb613cECE986c3FB046D84BFa6451) |
-| KMarkEngine (live) | [`0x9dB5972e01ca8F2170F7d0B2875F45C7e4f805D4`](https://testnet.monadvision.com/address/0x9dB5972e01ca8F2170F7d0B2875F45C7e4f805D4) |
-| HYNIX2X pool / token (live) | [`0x061B562B7BFD0C070D33b7e7C6c7DDE2A3A8be00`](https://testnet.monadvision.com/address/0x061B562B7BFD0C070D33b7e7C6c7DDE2A3A8be00) / [`0xB37d02822534a44Ae0a59D0e2C769fb06e9Ba80C`](https://testnet.monadvision.com/address/0xB37d02822534a44Ae0a59D0e2C769fb06e9Ba80C) |
-| SMSN2X pool / token (live) | [`0x39975d306Dd815C8153eA846862AFA6f544Fbfa9`](https://testnet.monadvision.com/address/0x39975d306Dd815C8153eA846862AFA6f544Fbfa9) / [`0x92d20eb4a76DCab66E687f8046a3b7F5daCDf08A`](https://testnet.monadvision.com/address/0x92d20eb4a76DCab66E687f8046a3b7F5daCDf08A) |
-| KMarkEngine (sandbox) | [`0x31192F3dB6D0aFA2EFad7983123DC971dD94c982`](https://testnet.monadvision.com/address/0x31192F3dB6D0aFA2EFad7983123DC971dD94c982) |
-| HYNIX2X pool / token (sandbox) | [`0x8Bbe486029E2303401C90D1C14bf6A904437ED02`](https://testnet.monadvision.com/address/0x8Bbe486029E2303401C90D1C14bf6A904437ED02) / [`0xa455d2DAbeA1cDDc44C0AE7536b6831f03510A12`](https://testnet.monadvision.com/address/0xa455d2DAbeA1cDDc44C0AE7536b6831f03510A12) |
-| SMSN2X pool / token (sandbox) | [`0x9630b9c640AFF6B6D4845BbF974201ebB2EC1999`](https://testnet.monadvision.com/address/0x9630b9c640AFF6B6D4845BbF974201ebB2EC1999) / [`0x068B0579Ac434D8dBea3c9fd6774e853721fe2cd`](https://testnet.monadvision.com/address/0x068B0579Ac434D8dBea3c9fd6774e853721fe2cd) |
-| KMarkEngine (incident replays) | [`0x34d3CeeA70b6B1e9B93a342A27a1C5c639454B93`](https://testnet.monadvision.com/address/0x34d3CeeA70b6B1e9B93a342A27a1C5c639454B93) |
+| Mock AUSD | [`0x32ed9B1Df89bE3eaaDcEEF617217bc2d9Ad04C77`](https://testnet.monadvision.com/address/0x32ed9B1Df89bE3eaaDcEEF617217bc2d9Ad04C77) |
+| KMarkEngine (live) | [`0xF71f77f6F266ac946d18cc86fb495C2df2607718`](https://testnet.monadvision.com/address/0xF71f77f6F266ac946d18cc86fb495C2df2607718) |
+| HYNIX2X pool / token (live) | [`0x564C6e2B8Fc23fca351E7201BD4eC992a07dD003`](https://testnet.monadvision.com/address/0x564C6e2B8Fc23fca351E7201BD4eC992a07dD003) / [`0x10779BB8B38fB5D7C6a59A14Bb50f654d7AF0F08`](https://testnet.monadvision.com/address/0x10779BB8B38fB5D7C6a59A14Bb50f654d7AF0F08) |
+| SMSN2X pool / token (live) | [`0x9cA5b76744A8f3D1D415868C9FC20B6CdC9f2493`](https://testnet.monadvision.com/address/0x9cA5b76744A8f3D1D415868C9FC20B6CdC9f2493) / [`0xA0B5e90b8c3eb6120D3482a2AC4e2de7a4AE9533`](https://testnet.monadvision.com/address/0xA0B5e90b8c3eb6120D3482a2AC4e2de7a4AE9533) |
+| KMarkEngine (sandbox) | [`0xe3580d4c450408a0640fA6983092CF0F13E4a040`](https://testnet.monadvision.com/address/0xe3580d4c450408a0640fA6983092CF0F13E4a040) |
+| HYNIX2X pool / token (sandbox) | [`0x2a0fC515ec0550E349a82f33a3C80ac461cEC828`](https://testnet.monadvision.com/address/0x2a0fC515ec0550E349a82f33a3C80ac461cEC828) / [`0x3eC85e2345ac6fd3DC2abaB84252E52147d14bD9`](https://testnet.monadvision.com/address/0x3eC85e2345ac6fd3DC2abaB84252E52147d14bD9) |
+| SMSN2X pool / token (sandbox) | [`0xa3060982B681A92E664db9897C99A69b4BA13c95`](https://testnet.monadvision.com/address/0xa3060982B681A92E664db9897C99A69b4BA13c95) / [`0x450426e2a945be242371c487D5856e3C3c7Bc33d`](https://testnet.monadvision.com/address/0x450426e2a945be242371c487D5856e3C3c7Bc33d) |
+| KMarkEngine (incident replays) | [`0x4B847a58ACfe0256505E9b1592dD7bb3F250221E`](https://testnet.monadvision.com/address/0x4B847a58ACfe0256505E9b1592dD7bb3F250221E) |
+
+| Key | Role | Address |
+| --- | --- | --- |
+| Operator | Owner of every contract; records the incident replays | [`0xc3880052864B6d9CCE2A39303772A0a7Fa5Ec752`](https://testnet.monadvision.com/address/0xc3880052864B6d9CCE2A39303772A0a7Fa5Ec752) |
+| Live relayer | The only key that may post prices to the live engine (GitHub Actions) | [`0x1bA5f3D09ddF1d06ca2713742E34f77d904855b5`](https://testnet.monadvision.com/address/0x1bA5f3D09ddF1d06ca2713742E34f77d904855b5) |
+| Web signer | Steps the sandbox and runs the demo faucet (Vercel) | [`0x80E8C3a9bfa3101CF7406a40E2E15260860391C8`](https://testnet.monadvision.com/address/0x80E8C3a9bfa3101CF7406a40E2E15260860391C8) |
 
 Machine-readable copies: [`deployments/10143.json`](deployments/10143.json) and [`deployments/10143.live.json`](deployments/10143.live.json). Recorded replay events: [`data/onchain/10143/`](data/onchain/10143/).
 
@@ -125,11 +131,11 @@ anvil --port 8545 --chain-id 31337 --gas-limit 150000000
 NEXT_PUBLIC_CHAIN_ID=31337 npm run dev -w @k2x/web
 ```
 
-Against testnet, set `OPERATOR_PRIVATE_KEY` (a funded testnet key) in `.env` and use the `testnet` network in the relayer CLIs, for example `npm run live -w @k2x/relayer -- testnet --minutes 30`.
+Against testnet, copy `.env.example` to `.env` and fill in funded testnet keys. Each role has its own key, so the live relayer, the web server and the owner never share a nonce: `npm run live -w @k2x/relayer -- testnet --minutes 30` uses `LIVE_RELAYER_PRIVATE_KEY`.
 
 ## Limitations
 
-- **One relayer.** Reports come from a single operator key. K-Mark limits what a bad or compromised relayer can do (no future-dated, out-of-band or unconfirmed prices; forward pricing removes same-transaction games), but it does not yet verify the source data cryptographically.
+- **One relayer.** Live reports come from a single relayer key. K-Mark limits what a bad or compromised relayer can do (no future-dated, out-of-band, malformed or unconfirmed prices, one official close a day; requests settle only at prices formed after them), but it does not yet verify the source data cryptographically. The owner key can record a missed official close, bounded by the ±30% band.
 - **Public quote feed.** Live data comes from Naver Finance's public polling endpoint, aggregated into windows. A production version needs licensed KRX/NXT data.
 - **Testnet only.** AUSD is a mock with a faucet. Nothing here is an offer to residents of Korea or the United States.
 

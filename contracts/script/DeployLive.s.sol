@@ -11,7 +11,8 @@ import {MockAUSD} from "../src/MockAUSD.sol";
 /// @notice Deploys the LIVE instance: an engine on the real clock fed by real-time KRX/NXT data,
 ///         with HYNIX2X and SMSN2X pools. Reuses MockAUSD from deployments/<chainid>.json.
 ///         Seed closes come from the environment (LIVE_HYNIX_DAY/PX, LIVE_SMSN_DAY/PX), fetched
-///         by `relayer/src/cli/live-seed.ts` right before deploying.
+///         by `relayer/src/cli/live-seed.ts` right before deploying. Only LIVE_RELAYER_ADDRESS (defaults
+///         to the operator) may post prices; the operator keeps ownership.
 contract DeployLive is Script {
     uint256 internal constant NAV0 = 10e18;
     uint128 internal constant SEED_LIQUIDITY = 1_000_000e6;
@@ -19,6 +20,7 @@ contract DeployLive is Script {
     function run() external {
         uint256 pk = vm.envUint("OPERATOR_PRIVATE_KEY");
         address op = vm.addr(pk);
+        address relayer = vm.envOr("LIVE_RELAYER_ADDRESS", op);
         string memory base = vm.readFile(string.concat("../deployments/", vm.toString(block.chainid), ".json"));
         MockAUSD ausd = MockAUSD(vm.parseJsonAddress(base, ".ausd"));
         uint256 startBlock = block.number;
@@ -29,7 +31,7 @@ contract DeployLive is Script {
         vm.startBroadcast(pk);
 
         KMarkEngine live = new KMarkEngine(KMarkEngine.ClockMode.LIVE, op);
-        live.setRelayer(op, true);
+        live.setRelayer(relayer, true);
         _liveParams(live);
         _calendar(live);
         live.listMarket(hynix, "SK hynix");
@@ -53,6 +55,7 @@ contract DeployLive is Script {
         vm.serializeUint(k, "chainId", block.chainid);
         vm.serializeUint(k, "startBlock", startBlock);
         vm.serializeAddress(k, "operator", op);
+        vm.serializeAddress(k, "relayer", relayer);
         vm.serializeAddress(k, "ausd", address(ausd));
         vm.serializeAddress(k, "liveEngine", address(live));
         vm.serializeAddress(k, "hynixPool", address(hPool));

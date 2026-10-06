@@ -49,6 +49,8 @@ export const REASON_TEXT: Record<string, string> = {
   FUTURE_TIMESTAMP: "Report dated in the future",
   TOO_OLD: "Report arrived too late",
   NO_BASE: "No reference close yet",
+  MALFORMED: "Inconsistent report — prices outside its own low–high, or an auction with more than one price",
+  AUCTION_DONE: "Today's auction price is already set",
 };
 
 export const SESSION_TEXT: Record<string, string> = {

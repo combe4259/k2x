@@ -278,4 +278,125 @@ contract KMarkEngineTest is EngineBase {
         assertEq(engine.priceAt(HYNIX, 2).px, 1_801_000);
         assertEq(engine.priceAt(HYNIX, 3).at, T0728_0900 + 3);
     }
+
+    // ─────────── Review fixes: a compromised or careless relayer stays inside the rules ───────────
+
+    /// An auction is one price. A close whose lastPx differs from the band-checked prices is refused,
+    /// so it can neither set an out-of-band official close nor a zero close that would brick the pool.
+    function test_auctionMustBeOnePrice() public {
+        _openSession(1_800_000);
+        KMarkEngine.Report memory r = _rep(KRX, CLOSE, T0728_1530, 2_000, 3_000, 1_850_000);
+        r.lastPx = 18_500_000;
+        (KMarkEngine.Decision d, KMarkEngine.Reason why) = engine.submit(r);
+        _assertDecision(d, why, KMarkEngine.Decision.REJECTED, KMarkEngine.Reason.MALFORMED);
+        r = _rep(KRX, CLOSE, T0728_1530 + 1, 2_000, 3_000, 1_850_000);
+        r.lastPx = 0;
+        (d, why) = engine.submit(r);
+        _assertDecision(d, why, KMarkEngine.Decision.REJECTED, KMarkEngine.Reason.MALFORMED);
+        assertEq(engine.closeCount(HYNIX), 1, "no close recorded");
+    }
+
+    function test_continuousPricesMustSitInsideLowHigh() public {
+        _openSession(1_800_000);
+        KMarkEngine.Report memory r = _rep(KRX, CONT, T0728_0900 + 10, 50, 50, 1_800_000);
+        r.firstPx = 2_400_000;
+        (KMarkEngine.Decision d, KMarkEngine.Reason why) = engine.submit(r);
+        _assertDecision(d, why, KMarkEngine.Decision.REJECTED, KMarkEngine.Reason.MALFORMED);
+    }
+
+    /// One official close per day: repeated close prints cannot walk the band or rebase twice.
+    function test_secondCloseOnTheSameDayIsRefused() public {
+        _openSession(1_800_000);
+        _send(KRX, CLOSE, T0728_1530, 2_000, 3_000, 1_850_000);
+        (KMarkEngine.Decision d, KMarkEngine.Reason why) = _send(KRX, CLOSE, T0728_1530 + 1, 2_000, 3_000, 2_300_000);
+        _assertDecision(d, why, KMarkEngine.Decision.REJECTED, KMarkEngine.Reason.AUCTION_DONE);
+        assertEq(engine.closeCount(HYNIX), 2);
+        assertEq(engine.bandBase(HYNIX, D0728), CLOSE_0727, "after-market band stays on 7/27");
+        assertEq(engine.bandBase(HYNIX, D0728 + 1), 1_850_000);
+    }
+
+    function test_secondOpenOnTheSameDayIsRefused() public {
+        _openSession(1_800_000);
+        (KMarkEngine.Decision d, KMarkEngine.Reason why) = _send(KRX, OPEN, T0728_0900 + 1, 900, 2_000, 1_700_000);
+        _assertDecision(d, why, KMarkEngine.Decision.REJECTED, KMarkEngine.Reason.AUCTION_DONE);
+    }
+
+    function test_thinCloseCanBeRetried() public {
+        _openSession(1_800_000);
+        (KMarkEngine.Decision d, KMarkEngine.Reason why) = _send(KRX, CLOSE, T0728_1530, 1, 1, 1_850_000);
+        _assertDecision(d, why, KMarkEngine.Decision.HELD, KMarkEngine.Reason.THIN_AUCTION);
+        (d, why) = _send(KRX, CLOSE, T0728_1530 + 5, 2_000, 3_000, 1_850_000);
+        _assertDecision(d, why, KMarkEngine.Decision.ACCEPTED, KMarkEngine.Reason.NONE);
+    }
+
+    /// A missed close can be recorded afterwards, inside that day's band, so the next day's band
+    /// does not stay on an old close.
+    function test_recordMissedClose() public {
+        _openSession(1_800_000);
+        vm.expectRevert(KMarkEngine.TooEarly.selector);
+        engine.recordClose(HYNIX, D0728, 2_000_000);
+
+        _send(NXT, CONT, T0728_1530 + HOUR, 5, 5, 1_990_000); // the replay clock passes 15:35
+        vm.expectRevert(KMarkEngine.OutOfBand.selector);
+        engine.recordClose(HYNIX, D0728, 2_400_000);
+        vm.prank(address(0xBEEF));
+        vm.expectRevert();
+        engine.recordClose(HYNIX, D0728, 2_000_000);
+
+        engine.recordClose(HYNIX, D0728, 2_000_000);
+        assertEq(engine.bandBase(HYNIX, D0728 + 1), 2_000_000);
+        KMarkEngine.CloseRec memory c = engine.closeAt(HYNIX, 1);
+        assertEq(engine.priceAt(HYNIX, c.seq).px, 2_000_000);
+        assertTrue(engine.priceAt(HYNIX, c.seq).isClose);
+        vm.expectRevert(KMarkEngine.CloseExists.selector);
+        engine.recordClose(HYNIX, D0728, 2_000_000);
+    }
+
+    /// While a volume-backed jump waits for confirmation, a lone print near the old price neither
+    /// clears it nor becomes the trusted price.
+    function test_thinPrintCannotOverruleAPendingJump() public {
+        _openSession(1_800_000);
+        uint64 t = T0728_0900 + HOUR;
+        (KMarkEngine.Decision d, KMarkEngine.Reason why) = _send(KRX, CONT, t + 1, 300, 600, 1_700_000); // ₩10억, -5.6%
+        _assertDecision(d, why, KMarkEngine.Decision.HELD, KMarkEngine.Reason.JUMP_PENDING);
+        (d, why) = _send(NXT, CONT, t + 2, 1, 1, 1_795_000);
+        _assertDecision(d, why, KMarkEngine.Decision.HELD, KMarkEngine.Reason.JUMP_PENDING);
+        (uint64 px, uint64 seq) = _trusted();
+        assertEq(px, 1_800_000);
+        assertEq(seq, 1);
+        (d, why) = _send(KRX, CONT, t + 3, 300, 600, 1_698_000);
+        _assertDecision(d, why, KMarkEngine.Decision.ACCEPTED, KMarkEngine.Reason.NONE);
+    }
+
+    /// The thin cold-market case: two self-crossed trades worth ₩3억 at the lower limit are not enough;
+    /// a jump that sets the session's first price also needs warm-up's trade count.
+    function test_twoTradesCannotConfirmALimitDown() public {
+        (KMarkEngine.Decision d, KMarkEngine.Reason why) = _send(NXT, CONT, T0728_0800 + 1, 1, 116, 1_290_000);
+        _assertDecision(d, why, KMarkEngine.Decision.HELD, KMarkEngine.Reason.JUMP_PENDING);
+        (d, why) = _send(NXT, CONT, T0728_0800 + 2, 1, 117, 1_290_000);
+        _assertDecision(d, why, KMarkEngine.Decision.HELD, KMarkEngine.Reason.JUMP_PENDING);
+        (uint64 px,) = _trusted();
+        assertEq(px, 0, "nothing trusted yet");
+    }
+
+    function test_haltResumeRestartsWarmup() public {
+        _openSession(1_800_000);
+        uint64 t = T0728_0900 + HOUR;
+        KMarkEngine.Report memory r = _rep(KRX, CONT, t + 1, 50, 50, 1_800_000);
+        r.flags = 2; // FLAG_HALT
+        (KMarkEngine.Decision d, KMarkEngine.Reason why) = engine.submit(r);
+        _assertDecision(d, why, KMarkEngine.Decision.HELD, KMarkEngine.Reason.HALT);
+        (d, why) = _send(KRX, CONT, t + 3 * HOUR, 1, 1, 1_760_000);
+        _assertDecision(d, why, KMarkEngine.Decision.HELD, KMarkEngine.Reason.WARMUP);
+    }
+
+    /// Pools settle only at prices formed after a request, so every price records where its data starts.
+    function test_pricesRecordWhereTheirDataStarts() public {
+        _openSession(1_800_000);
+        assertEq(engine.priceAt(HYNIX, 1).from, T0728_0900, "auction: its match time");
+        KMarkEngine.Report memory r = _rep(KRX, CONT, T0728_0900 + 40, 50, 50, 1_801_000);
+        r.windowStart = T0728_0900 + 10;
+        engine.submit(r);
+        assertEq(engine.priceAt(HYNIX, 2).from, T0728_0900 + 10, "continuous: its window start");
+    }
 }

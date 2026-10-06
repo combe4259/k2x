@@ -16,6 +16,8 @@ export type TapeRow = {
   reason: string;
   txHash: string;
   note?: string;
+  /** For a rejected jump candidate: when the print itself happened (`at` is when it was rejected). */
+  printedAt?: number;
 };
 
 /** Pair each RawPrint with the verdict emitted in the same transaction. */
@@ -28,9 +30,11 @@ export function toTape(events: EngineEvent[]): TapeRow[] {
     if (!raw || raw.type !== "raw") continue;
     for (const e of list) {
       if (e.type === "rejected" && e.reason === "JUMP_UNCONFIRMED") {
+        // the engine emits the candidate's own time, but this transaction is what rejected it
         rows.push({
           key: `${tx}-cand`,
-          at: e.at,
+          at: raw.windowEnd,
+          printedAt: e.at,
           venue: e.venue,
           kind: 0,
           px: e.px,
@@ -40,7 +44,7 @@ export function toTape(events: EngineEvent[]): TapeRow[] {
           verdict: "rejected",
           reason: e.reason,
           txHash: tx,
-          note: "earlier print, not confirmed by the trades that followed",
+          note: `printed ${kstClock(e.at)}, not confirmed by the trades that followed`,
         });
       }
     }
@@ -64,9 +68,23 @@ export function toTape(events: EngineEvent[]): TapeRow[] {
   return rows.sort((a, b) => b.at - a.at || (a.key.endsWith("-cand") ? 1 : -1));
 }
 
-export function VerdictTape({ rows, reference, limit = 12 }: { rows: TapeRow[]; reference?: number; limit?: number }) {
+export function VerdictTape({
+  rows,
+  reference,
+  limit = 12,
+  error,
+}: {
+  rows: TapeRow[];
+  reference?: number;
+  limit?: number;
+  error?: Error;
+}) {
   if (rows.length === 0) {
-    return <p className="py-6 text-sm text-ink-2">No prints yet. Verdicts appear here as the relayer posts trades.</p>;
+    return error ? (
+      <p className="py-6 text-sm text-up">Could not read verdicts from the Monad RPC. Retrying…</p>
+    ) : (
+      <p className="py-6 text-sm text-ink-2">No prints yet. Verdicts appear here as the relayer posts trades.</p>
+    );
   }
   return (
     <ol className="divide-y divide-rule">

@@ -13,6 +13,8 @@ import {MockAUSD} from "../src/MockAUSD.sol";
 ///   - sandbox engine (REPLAY clock): a real KRX session replayed minute by minute, with
 ///     HYNIX2X / SMSN2X pools that anyone can mint, redeem and provide liquidity to
 ///   - MockAUSD (testnet stand-in for Agora AUSD)
+/// Roles: the operator key owns everything and records the incident replays; the web server's key
+/// (WEB_SIGNER_ADDRESS, defaults to the operator) steps the sandbox and runs the AUSD faucet.
 /// Writes addresses to ../deployments/<chainid>.json for the relayer and the web app.
 contract Deploy is Script {
     uint256 internal constant NAV0 = 10e18; // tokens start at 10 AUSD
@@ -26,6 +28,7 @@ contract Deploy is Script {
     function run() external {
         uint256 pk = vm.envUint("OPERATOR_PRIVATE_KEY");
         address op = vm.addr(pk);
+        address web = vm.envOr("WEB_SIGNER_ADDRESS", op);
         uint256 startBlock = block.number;
 
         string memory r0728 = vm.readFile("../data/replays/2026-07-28_000660.json");
@@ -41,6 +44,7 @@ contract Deploy is Script {
         vm.startBroadcast(pk);
 
         MockAUSD ausd = new MockAUSD(op);
+        if (web != op) ausd.setMinter(web, true);
 
         KMarkEngine incident = new KMarkEngine(KMarkEngine.ClockMode.REPLAY, op);
         incident.setRelayer(op, true);
@@ -51,6 +55,7 @@ contract Deploy is Script {
 
         KMarkEngine sandbox = new KMarkEngine(KMarkEngine.ClockMode.REPLAY, op);
         sandbox.setRelayer(op, true);
+        if (web != op) sandbox.setRelayer(web, true);
         (
             uint16 bandBps,
             uint16 jumpBps,
@@ -100,6 +105,7 @@ contract Deploy is Script {
         vm.serializeUint(k, "chainId", block.chainid);
         vm.serializeUint(k, "startBlock", startBlock);
         vm.serializeAddress(k, "operator", op);
+        vm.serializeAddress(k, "webSigner", web);
         vm.serializeAddress(k, "ausd", address(ausd));
         vm.serializeAddress(k, "incidentEngine", address(incident));
         vm.serializeAddress(k, "sandboxEngine", address(sandbox));

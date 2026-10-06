@@ -7,16 +7,18 @@ import { VerdictTape } from "@/components/VerdictTape";
 import { AUSD, CHAIN_ID, INCIDENT_ENGINE, INSTANCES, addressUrl } from "@/lib/config";
 import { defaultInstance, useEngineClock, useSnapshot, useTape } from "@/lib/data";
 import { useNow } from "@/lib/hooks";
+import { sessionOf } from "@/lib/session";
 
 export default function Home() {
   const instance = defaultInstance;
   const now = useNow();
-  const { data: liveTape } = useTape(instance, "hynix");
-  const { data: sandboxTape } = useTape("sandbox", "hynix");
-  // when the live market is closed and quiet, show the sandbox replay instead of an empty tape
-  const live = instance === "live" && (liveTape?.length ?? 0) > 0;
+  // while the Korean market is closed, show the sandbox replay instead of an empty tape. Decided by the
+  // calendar, not by how many rows came back, so a failed RPC read cannot flip the panel.
+  const live = instance === "live" && sessionOf(now) !== "CLOSED";
   const tapeInstance = live ? instance : "sandbox";
-  const tape = live ? liveTape : sandboxTape;
+  const liveTape = useTape(instance, "hynix", 4000, 900n, live);
+  const sandboxTape = useTape("sandbox", "hynix", 4000, 900n, !live);
+  const { data: tape, error: tapeError } = live ? liveTape : sandboxTape;
   const { data: engineNow } = useEngineClock(tapeInstance);
   const { data: snap } = useSnapshot(tapeInstance, "hynix");
 
@@ -56,7 +58,7 @@ export default function Home() {
           </div>
           <SessionBand now={live ? now : engineNow || now} clockLabel={live ? "KST" : "Sandbox clock"} />
           <div className="mt-4">
-            <VerdictTape rows={tape ?? []} reference={snap ? Number(snap.basePx) : undefined} limit={9} />
+            <VerdictTape rows={tape ?? []} reference={snap ? Number(snap.basePx) : undefined} limit={9} error={tapeError} />
           </div>
           {!live && (
             <p className="mt-3 border-t border-rule pt-3 text-xs text-ink-3">
@@ -87,7 +89,7 @@ export default function Home() {
             who="trade.xyz SK hynix perp"
             what="At 08:00 KST one share printed at the lower limit on the NXT pre-market (−29.99%). The oracle passed it through; the mark fell 18.7%."
             cost="≈ $57M of longs liquidated"
-            fix="K-Mark held the print, rejected it when the next trades did not confirm it, and followed the real −6% gap four seconds later."
+            fix="K-Mark held the print, rejected it when the next trades did not confirm it, and followed the real −6% gap six seconds later, once 20 trades had confirmed it."
             href="/replay"
           />
         </div>

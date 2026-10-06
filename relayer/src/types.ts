@@ -59,6 +59,8 @@ export const Reason = [
   "HALT",
   "THIN_AUCTION",
   "NO_BASE",
+  "MALFORMED",
+  "AUCTION_DONE",
 ] as const;
 export type ReasonName = (typeof Reason)[number];
 

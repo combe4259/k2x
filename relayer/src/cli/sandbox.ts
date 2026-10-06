@@ -11,6 +11,6 @@ const markets = sandboxMarkets(
   loadDataset("sandbox/2026-10-02_000660.json"),
   loadDataset("sandbox/2026-10-02_005930.json"),
 );
-const res = await stepSandbox(clients, deployment, markets, Number(stepsArg));
+const res = await stepSandbox(clients, deployment, markets, Number(stepsArg), process.env.SANDBOX_SEED);
 const t = new Date((res.virtualTime + 9 * 3600) * 1000).toISOString().replace("T", " ").slice(0, 19);
 console.log(`posted ${res.posted} reports, virtual time ${t} KST, closes ${res.closes}, settled`, res.settled);

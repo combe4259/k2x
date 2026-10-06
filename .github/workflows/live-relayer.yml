@@ -2,7 +2,7 @@
 # GitHub-hosted jobs last at most 6 hours, so the day is covered by three scheduled runs.
 # Scheduled runs often start late, so each run is sized by the clock (until 20:10 KST at most)
 # rather than by which cron fired, and the morning run is scheduled well before 08:00.
-# Needs repository secret OPERATOR_PRIVATE_KEY (Monad testnet operator).
+# Needs repository secret LIVE_RELAYER_PRIVATE_KEY: a key that may only post prices to the live engine.
 name: live-relayer
 
 on:
@@ -33,7 +33,7 @@ jobs:
       - run: npm ci
       - name: Relay
         env:
-          OPERATOR_PRIVATE_KEY: ${{ secrets.OPERATOR_PRIVATE_KEY }}
+          LIVE_RELAYER_PRIVATE_KEY: ${{ secrets.LIVE_RELAYER_PRIVATE_KEY }}
         run: |
           MIN="${{ github.event.inputs.minutes }}"
           if [ -z "$MIN" ]; then
