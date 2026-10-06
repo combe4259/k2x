@@ -80,6 +80,7 @@ contract KMarkEngine is Ownable {
     struct Params {
         uint16 bandBps; // daily limit band, 3000 = ±30%
         uint16 jumpBps; // move vs reference that needs confirmation
+        uint16 confirmBandBps; // a confirming window must trade within this distance of the candidate
         uint32 warmupTrades; // trades needed before a new segment is trusted
         uint32 confirmWindow; // seconds a jump candidate may wait for confirmation
         uint32 staleAfter; // seconds without a trusted update before the price is stale
@@ -188,8 +189,9 @@ contract KMarkEngine is Ownable {
         params = Params({
             bandBps: 3000,
             jumpBps: 300,
+            confirmBandBps: 200,
             warmupTrades: 20,
-            confirmWindow: 30,
+            confirmWindow: 60,
             staleAfter: 30,
             maxFutureSkew: 2,
             maxReportAge: 60,
@@ -344,10 +346,11 @@ contract KMarkEngine is Ownable {
         uint64 ref = (m.trustedDay == day && m.trustedPx != 0) ? m.trustedPx : base;
         bool jump = !_within(px, ref, p.jumpBps);
 
-        // R5 — a pending jump candidate is confirmed only by volume in the same direction
+        // R5 — a pending jump candidate is confirmed only by volume that keeps trading near it
         if (m.candPx != 0) {
             bool sameSide = (px < ref) == (m.candPx < ref);
-            if (jump && sameSide && t <= m.candAt + p.confirmWindow) {
+            bool near = _within(px, m.candPx, p.confirmBandBps);
+            if (jump && sameSide && near && t <= m.candAt + p.confirmWindow) {
                 m.candNotional += r.notional;
                 m.candWindows += 1;
                 m.candPx = px;

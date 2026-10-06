@@ -14,8 +14,39 @@ contract KMarkEngineTest is EngineBase {
 
     // ─────────── Incident replays ───────────
 
-    /// 2026-07-28 08:00 — one share printed at the lower limit right after the NXT pre-market opened.
-    function test_0728_singleSharePrintIsNeverTrusted() public {
+    /// 2026-07-28 08:00 as it happened: one share printed at the lower limit (-29.99%) while the real
+    /// pre-market was trading about 7.5% lower. The engine rejects the print and follows the real gap.
+    function test_0728_rejectsThePrintAndFollowsTheRealGap() public {
+        vm.recordLogs();
+        (KMarkEngine.Decision d, KMarkEngine.Reason why) = _send(NXT, CONT, T0728_0800 + 1, 1, 1, 1_272_000);
+        _assertDecision(d, why, KMarkEngine.Decision.HELD, KMarkEngine.Reason.JUMP_PENDING);
+
+        // real trades 7.5% lower: the -30% candidate is rejected, a new -7.5% candidate starts
+        vm.expectEmit(true, false, false, true, address(engine));
+        emit KMarkEngine.PriceRejected(HYNIX, KMarkEngine.Reason.JUMP_UNCONFIRMED, 1_272_000, T0728_0800 + 1, NXT);
+        (d, why) = _send(NXT, CONT, T0728_0800 + 2, 8, 40, 1_680_000);
+        _assertDecision(d, why, KMarkEngine.Decision.HELD, KMarkEngine.Reason.JUMP_PENDING);
+
+        // about ₩6,700만 a second keeps trading there; ₩3억 confirms the gap within seconds
+        uint64 sec = 2;
+        while (d != KMarkEngine.Decision.ACCEPTED) {
+            ++sec;
+            (d, why) = _send(NXT, CONT, T0728_0800 + sec, 8, 40, 1_678_000);
+        }
+        assertLe(sec, 6, "real gap followed within ~5 seconds");
+        (uint64 px,) = _trusted();
+        assertEq(px, 1_678_000);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].topics[0] != ACCEPTED_SIG) continue;
+            (uint64 acceptedPx,,,) = abi.decode(logs[i].data, (uint64, uint64, uint8, uint8));
+            assertTrue(acceptedPx != 1_272_000, "bad print must never be accepted");
+        }
+    }
+
+    /// Variant: an outlier followed by normal trading near the previous close.
+    function test_outlierThenNormalTradingNeedsWarmup() public {
         vm.recordLogs();
 
         (KMarkEngine.Decision d, KMarkEngine.Reason why) = _send(NXT, CONT, T0728_0800 + 1, 1, 1, 1_272_000);
@@ -97,10 +128,10 @@ contract KMarkEngineTest is EngineBase {
         _openSession(1_800_000);
         uint64 t = T0728_0900 + HOUR;
         _send(KRX, CONT, t + 1, 1, 1, 1_700_000);
-        // 31 seconds later, still at the new level but outside the confirmation window
+        // 61 seconds later, still at the new level but outside the confirmation window
         vm.expectEmit(true, false, false, true, address(engine));
         emit KMarkEngine.PriceRejected(HYNIX, KMarkEngine.Reason.JUMP_UNCONFIRMED, 1_700_000, t + 1, KRX);
-        (KMarkEngine.Decision d, KMarkEngine.Reason why) = _send(KRX, CONT, t + 32, 50, 50, 1_700_000);
+        (KMarkEngine.Decision d, KMarkEngine.Reason why) = _send(KRX, CONT, t + 62, 50, 50, 1_700_000);
         _assertDecision(d, why, KMarkEngine.Decision.HELD, KMarkEngine.Reason.JUMP_PENDING);
     }
 
