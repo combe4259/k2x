@@ -12,7 +12,10 @@
     "sandbox": "tsx src/cli/sandbox.ts",
     "keeper": "tsx src/cli/keeper.ts",
     "status": "tsx src/cli/status.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "live": "tsx src/cli/live.ts",
+    "live-seed": "tsx src/cli/live-seed.ts",
+    "live-sim": "tsx src/cli/live-sim.ts"
   },
   "dependencies": {
     "viem": "^2.57.3"

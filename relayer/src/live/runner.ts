@@ -14,6 +14,8 @@ import { settlePending, syncPool } from "../keeper.ts";
 import { Session, type EngineEvent } from "../types.ts";
 import { fetchQuote, type Quote } from "./naver.ts";
 
+export type QuoteSource = (code: string) => Promise<Quote>;
+
 export type LiveDeployment = {
   chainId: number;
   liveEngine: Hex;
@@ -35,11 +37,13 @@ const MIN_GAP = 4;
 const MOVE_BPS = 100;
 const MAX_WINDOW = 600;
 
+const PRE_START = 8 * 3600;
 const OPEN_T = 9 * 3600;
 const CONT_END = 15 * 3600 + 20 * 60;
 const CLOSE_T = 15 * 3600 + 30 * 60;
 
 type Window = {
+  session: string; // engine session the window belongs to; a new session starts a new window
   start: number;
   baseVolume: number;
   baseValue: number;
@@ -70,6 +74,7 @@ export class LiveRelayer {
     private engine: Hex,
     private markets: LiveMarket[],
     private log: LiveLog = console.log,
+    private source: QuoteSource = fetchQuote,
   ) {
     for (const m of markets) {
       this.state.set(m.code, {
@@ -99,7 +104,7 @@ export class LiveRelayer {
 
     for (const m of this.markets) {
       try {
-        const q = await fetchQuote(m.code);
+        const q = await this.source(m.code);
         await this.tickMarket(m, q, now, session, Number(day), Number(sod));
       } catch (err) {
         this.log(`[${m.code}] ${(err as Error).message}`);
@@ -135,7 +140,7 @@ export class LiveRelayer {
           start: now - 1,
         });
         st.openPostedDay = day;
-        st.krx.window = this.freshWindow(now, q.krx.cumVolume, q.krx.cumValue, q.krx.price);
+        st.krx.window = this.freshWindow(now, q.krx.cumVolume, q.krx.cumValue, q.krx.price, `${day}:${session}`);
       }
       return;
     }
@@ -162,14 +167,15 @@ export class LiveRelayer {
     }
 
     if (session === "CONTINUOUS" && sod >= OPEN_T && sod < CONT_END) {
-      await this.continuous(m, st.krx, VENUE_KRX, now, q.krx, waiting);
+      await this.continuous(m, st.krx, VENUE_KRX, now, q.krx, waiting, `${day}:${session}`, sod - OPEN_T);
     } else if ((session === "NXT_PRE" || session === "NXT_AFTER") && q.nxt) {
-      await this.continuous(m, st.nxt, VENUE_NXT, now, q.nxt, waiting);
+      const sessionStart = session === "NXT_PRE" ? PRE_START : CLOSE_T;
+      await this.continuous(m, st.nxt, VENUE_NXT, now, q.nxt, waiting, `${day}:${session}`, sod - sessionStart);
     }
   }
 
-  private freshWindow(now: number, volume: number, value: number, px: number): Window {
-    return { start: now, baseVolume: volume, baseValue: value, first: px, last: px, high: px, low: px };
+  private freshWindow(now: number, volume: number, value: number, px: number, session = ""): Window {
+    return { session, start: now, baseVolume: volume, baseValue: value, first: px, last: px, high: px, low: px };
   }
 
   private async continuous(
@@ -179,12 +185,19 @@ export class LiveRelayer {
     now: number,
     q: { price: number; cumVolume: number; cumValue: number },
     waiting: boolean,
+    sessionKey: string,
+    sinceSessionStart: number,
   ) {
     if (!(q.price > 0)) return;
-    // a venue's cumulative counters reset between sessions: restart the window
-    if (!v.window || q.cumVolume < v.window.baseVolume) {
-      v.window = this.freshWindow(now, q.cumVolume, q.cumValue, q.price);
-      return;
+    // new session, or the venue's cumulative counters were reset: start a new window
+    if (!v.window || v.window.session !== sessionKey || q.cumVolume < v.window.baseVolume) {
+      if (sinceSessionStart < 60) {
+        // the session just opened: counters start at zero, so the very first prints are kept
+        v.window = this.freshWindow(now - sinceSessionStart, 0, 0, q.price, sessionKey);
+      } else {
+        v.window = this.freshWindow(now, q.cumVolume, q.cumValue, q.price, sessionKey);
+        return;
+      }
     }
     const w = v.window;
     w.last = q.price;
@@ -210,7 +223,7 @@ export class LiveRelayer {
       low: w.low,
       start: Math.max(w.start, now - MAX_WINDOW),
     });
-    v.window = this.freshWindow(now, q.cumVolume, q.cumValue, q.price);
+    v.window = this.freshWindow(now, q.cumVolume, q.cumValue, q.price, sessionKey);
   }
 
   private lastTrusted(m: LiveMarket): number {
