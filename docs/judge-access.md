@@ -27,7 +27,7 @@ Also: [Price log](https://k2x-delta.vercel.app/engine?mode=replay) (filter **Rej
 
 The **Showing** switch (top right, in the strip under the header) picks which copy of the contracts the pages show. This guide uses **Replay day**: the real 2 Oct 2026 KRX session, replayed minute by minute on its own copy of the same contracts, so it works at any hour.
 
-While Korea is open (08:00–20:00 KST on weekdays, which is 19:00–07:00 ET until 1 Nov) the site opens on **Live Korea** by default. The guided demo still runs on the replay day. Anywhere else, press **Replay day** in the switch or add `?mode=replay` to the URL. Live Korea is not part of this demo.
+The site always opens on the **replay day**. The **Live Korea** switch shows a separate live copy of the contracts; it is not part of this demo.
 
 ## Things you may notice
 
