@@ -132,6 +132,8 @@ export default function ReplayPage() {
           reference={{ px: prevClose, label: `prev close ${krw(prevClose)}` }}
           cursor={cursor}
           series={[
+            // the full path, invisible, keeps the price axis still while the replay plays
+            { label: "", points: [...rawSeries.filter(inView), ...trustedSeries.filter(inView)], color: "transparent", width: 0 },
             { label: "pass-through", points: rawSeries.filter(inView).filter(upTo), color: "var(--ink-3)", width: 1.25, step: true },
             { label: "K-Mark", points: trustedSeries.filter(inView).filter(upTo), color: "var(--accepted)", width: 2.5, step: true },
           ]}
@@ -181,6 +183,7 @@ export default function ReplayPage() {
             label="2x token marked at that price"
             value={isFinite(naiveLow) ? pct(2 * (naiveLow / prevClose - 1), 1) : "—"}
             move={isFinite(naiveLow) ? naiveLow / prevClose - 1 : 0}
+            plain
           />
           <p className="mt-4 border-t border-rule pt-3 text-sm text-ink-2">
             {key === "2026-07-28_000660"
@@ -196,6 +199,7 @@ export default function ReplayPage() {
             label="2x token marked at that price"
             value={isFinite(trustedLow) ? pct(2 * (trustedLow / prevClose - 1), 1) : "—"}
             move={isFinite(trustedLow) ? trustedLow / prevClose - 1 : 0}
+            plain
           />
           <div className="mt-3 flex items-center justify-between gap-3 text-sm">
             <span className="text-ink-2">The {key === "2026-07-28_000660" ? "1-share" : "11-share"} print</span>
@@ -247,13 +251,13 @@ export default function ReplayPage() {
   );
 }
 
-function Row({ label, value, move }: { label: string; value: string; move: number }) {
+function Row({ label, value, move, plain }: { label: string; value: string; move: number; plain?: boolean }) {
   return (
     <div className="mt-3 flex items-baseline justify-between gap-3">
       <span className="text-sm text-ink-2">{label}</span>
       <span className={`num text-lg ${dirClass(move)}`}>
         {value}
-        {move ? <span className="ml-2 text-xs">{pct(move, 1)}</span> : null}
+        {move && !plain ? <span className="ml-2 text-xs">{pct(move, 1)}</span> : null}
       </span>
     </div>
   );
