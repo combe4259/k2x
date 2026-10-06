@@ -1,18 +1,20 @@
 # Runs the K2X live relayer during Korean market hours (08:00–20:00 KST, Mon–Fri).
 # GitHub-hosted jobs last at most 6 hours, so the day is covered by three scheduled runs.
+# Scheduled runs often start late, so each run is sized by the clock (until 20:10 KST at most)
+# rather than by which cron fired, and the morning run is scheduled well before 08:00.
 # Needs repository secret OPERATOR_PRIVATE_KEY (Monad testnet operator).
 name: live-relayer
 
 on:
   schedule:
-    - cron: "55 22 * * 0-4" # 07:55 KST Mon–Fri
-    - cron: "50 4 * * 1-5" # 13:50 KST
-    - cron: "45 10 * * 1-5" # 19:45 KST
+    - cron: "30 22 * * 0-4" # 07:30 KST Mon–Fri
+    - cron: "20 4 * * 1-5" # 13:20 KST
+    - cron: "10 10 * * 1-5" # 19:10 KST
   workflow_dispatch:
     inputs:
       minutes:
-        description: "How long to run (max 355)"
-        default: "355"
+        description: "How long to run (max 350)"
+        default: "350"
 
 concurrency:
   group: live-relayer
@@ -35,10 +37,10 @@ jobs:
         run: |
           MIN="${{ github.event.inputs.minutes }}"
           if [ -z "$MIN" ]; then
-            case "$(date -u +%H)" in
-              22|23) MIN=355 ;;   # morning run until ~13:50 KST
-              04|05) MIN=355 ;;   # afternoon run until ~19:45 KST
-              *) MIN=25 ;;        # evening run until 20:10 KST
-            esac
+            # run until 20:10 KST, capped by the 6-hour job limit; the next run is queued behind this one
+            NOW=$(( 10#$(TZ=Asia/Seoul date +%H) * 60 + 10#$(TZ=Asia/Seoul date +%M) ))
+            MIN=$(( 20 * 60 + 10 - NOW ))
+            [ "$MIN" -gt 350 ] && MIN=350
+            if [ "$MIN" -lt 1 ]; then echo "past 20:10 KST, nothing to do"; exit 0; fi
           fi
           npm run live -w @k2x/relayer -- testnet --minutes "$MIN"
