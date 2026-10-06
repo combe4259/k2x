@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+/*
+  K2X tokens
+  paper/sheet/ink  — calm exchange-board neutrals
+  up/down          — Korean market convention: red rises, blue falls
+  accepted/held/rejected — verdict inks, deliberately not red/blue
+*/
+:root {
+  --paper: #f3f5f8;
+  --sheet: #ffffff;
+  --ink: #0f1a2a;
+  --ink-2: #4a5569;
+  --ink-3: #7b8597;
+  --rule: #dde2ea;
+  --tint: #e9edf3;
+  --up: #d42a3c;
+  --down: #1f5bd6;
+  --accepted: #0d7a68;
+  --held: #a76a00;
+  --rejected: #6a3aa0;
+  --krx: #0f1a2a;
+  --nxt: #5c6b84;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #0c121c;
+    --sheet: #121a26;
+    --ink: #e8edf5;
+    --ink-2: #a9b3c4;
+    --ink-3: #7d889b;
+    --rule: #243044;
+    --tint: #18212f;
+    --up: #ff5a6a;
+    --down: #5b8cff;
+    --accepted: #36c2a6;
+    --held: #e0a63a;
+    --rejected: #b48cf0;
+    --krx: #e8edf5;
+    --nxt: #8d9ab1;
+  }
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-sheet: var(--sheet);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-rule: var(--rule);
+  --color-tint: var(--tint);
+  --color-up: var(--up);
+  --color-down: var(--down);
+  --color-accepted: var(--accepted);
+  --color-held: var(--held);
+  --color-rejected: var(--rejected);
+  --font-display: var(--font-archivo), ui-sans-serif, system-ui;
+  --font-sans: var(--font-plex-kr), ui-sans-serif, system-ui;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+}
+
+html,
+body {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.display {
+  font-family: var(--font-display);
+  font-stretch: 118%;
+  letter-spacing: -0.015em;
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.card {
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--down);
+  outline-offset: 2px;
+}
+
+@keyframes tape-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.tape-in {
+  animation: tape-in 260ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tape-in {
+    animation: none;
+  }
+}

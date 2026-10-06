@@ -24,3 +24,7 @@ deployments/31337.json
 
 deployments/31337.live.json
 data/onchain/31337/
+
+# web
+web/src/generated/
+web/next-env.d.ts
