@@ -2,7 +2,7 @@
 
 - **Live product:** https://k2x-delta.vercel.app (Monad testnet, chain 10143)
 - **Source:** https://github.com/combe4259/k2x
-- **Demo video:** <DEMO_VIDEO_URL>
+- **Demo video:** https://youtu.be/zRYDrUbkSqY
 
 ## No login needed
 

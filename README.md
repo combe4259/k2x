@@ -4,7 +4,7 @@
 
 > SK하이닉스·삼성전자 2배 토큰. 청산이 없고, 발행·환매는 한국 장 규칙으로 걸러낸 다음 가격에 체결됩니다.
 
-Built for Monad Metropolis, Track 1 (Onchain Finance & Trading). Live on Monad testnet: **https://k2x-delta.vercel.app**
+Built for Monad Metropolis, Track 1 (Onchain Finance & Trading). Live on Monad testnet: **https://k2x-delta.vercel.app** · [Demo video](https://youtu.be/zRYDrUbkSqY) · [Pitch video](https://youtu.be/CpLP_pbb04I) · [Judge guide](docs/judge-access.md)
 
 ## Try it in four steps (works at any hour)
 
