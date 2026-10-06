@@ -50,7 +50,7 @@ export function DemoGuide() {
         Demo {demo + 1}/{DEMO_STEPS.length}
       </span>
       <span className="font-medium">{step.title}</span>
-      <span className="min-w-0 flex-1 text-ink-2">{msg?.text ? <span className={msg.error ? "text-up" : ""}>{msg.text}</span> : step.hint}</span>
+      <span className="min-w-0 basis-full text-ink-2 sm:basis-0 sm:flex-1">{msg?.text ? <span className={msg.error ? "text-up" : ""}>{msg.text}</span> : step.hint}</span>
       <span className="flex shrink-0 items-center gap-2">
         {step.key === "fund" ? (
           <button disabled={working} onClick={fund} className="rounded-md bg-ink px-3 py-1 font-medium text-sheet disabled:opacity-50">
