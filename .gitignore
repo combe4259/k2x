@@ -30,3 +30,6 @@ web/src/generated/
 web/next-env.d.ts
 .env*
 data/proof/31337.json
+
+# submission bundle (videos, form drafts) — kept locally, not in git
+submission/

@@ -8,7 +8,7 @@ import { sessionOf } from "./session";
  * Which copy of the contracts the site shows. Both run the same code on Monad testnet:
  *   replay — a separate engine replaying the real 2 Oct KRX session minute by minute, so it works at any hour
  *   live   — real SK hynix and Samsung trades, 08:00–20:00 KST on weekdays
- * The default follows the Korean clock; a choice made here lasts for the visit.
+ * The site opens on the replay day; choosing Live Korea lasts for the visit.
  */
 export type Mode = "replay" | "live";
 
@@ -72,9 +72,8 @@ export function ModeProvider({ children }: { children: ReactNode }) {
     [demo, setDemo],
   );
 
-  // the guided demo always runs on the replay day, so it works at any hour
-  const auto: Mode = koreaOpen && INSTANCES.live ? "live" : "replay";
-  const mode: Mode = picked ?? (demo !== null && demo < DEMO_STEPS.length ? "replay" : auto);
+  // the site always opens on the replay day, which works at any hour; Live Korea is a choice
+  const mode: Mode = picked === "live" && INSTANCES.live ? "live" : "replay";
   const instance: InstanceKey = mode === "live" && INSTANCES.live ? "live" : "sandbox";
 
   return (

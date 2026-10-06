@@ -15,14 +15,14 @@ Korea trades 08:00–20:00 KST on weekdays, which is 19:00–07:00 ET. Outside t
 3. **Mint HYNIX2X** — [Mint & redeem](https://k2x-delta.vercel.app/trade). Request a mint; the replay day moves a minute and the result reads *"You asked while price #N was the latest. You got price #N+1, set after you asked."*
 4. **See who is on the other side** — [Pool](https://k2x-delta.vercel.app/pool): your share of what the pool owes holders, and what a limit-up day would cost the LPs.
 
-During Korean hours, switch **Showing** (top right) to **Live Korea** to see real KRX and NXT trades judged as they happen.
+The site always opens on the replay day. A live copy of the contracts is also deployed: switching **Showing** (top right) to **Live Korea** shows it, with requests made outside Korean hours (08:00–20:00 KST, weekdays) waiting for the next session.
 
 ## Status
 
 | Part | State |
 | --- | --- |
-| K-Mark engine, K2X token and pool | Deployed on Monad testnet (three copies: live, replay day, incident replays) |
-| Live prices | Real SK hynix and Samsung quotes from a public feed, posted by one relayer (GitHub Actions, weekdays 07:30–20:10 KST) |
+| K-Mark engine, K2X token and pool | Deployed on Monad testnet (three copies: live, replay day, incident replays); source verified on Sourcify |
+| Live copy | Deployed; its relayer (one key, GitHub Actions, weekdays 07:30–20:10 KST) posts real SK hynix and Samsung quotes from a public feed. The demo uses the replay day |
 | 7/28 and 8/6 incidents | Replayed on testnet; the prints, previous closes and KRX opens are observed, the trades between them reconstructed |
 | AUSD | Mock token with a faucet |
 | Pool hedging | Not built; the pool is unhedged |
@@ -130,6 +130,8 @@ Three engine instances run on testnet:
 | Operator | Owner of every contract; records the incident replays | [`0xc3880052864B6d9CCE2A39303772A0a7Fa5Ec752`](https://testnet.monadvision.com/address/0xc3880052864B6d9CCE2A39303772A0a7Fa5Ec752) |
 | Live relayer | The only key that may post prices to the live engine (GitHub Actions) | [`0x1bA5f3D09ddF1d06ca2713742E34f77d904855b5`](https://testnet.monadvision.com/address/0x1bA5f3D09ddF1d06ca2713742E34f77d904855b5) |
 | Web signer | Steps the sandbox and runs the demo faucet (Vercel) | [`0x80E8C3a9bfa3101CF7406a40E2E15260860391C8`](https://testnet.monadvision.com/address/0x80E8C3a9bfa3101CF7406a40E2E15260860391C8) |
+
+Every contract's source is verified on Monad's Sourcify instance (the one MonadVision reads), so the explorer shows the source and decodes events such as `PriceRejected`.
 
 Machine-readable copies: [`deployments/10143.json`](deployments/10143.json) and [`deployments/10143.live.json`](deployments/10143.live.json). Recorded replay events: [`data/onchain/10143/`](data/onchain/10143/).
 
