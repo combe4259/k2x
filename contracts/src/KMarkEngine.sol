@@ -137,7 +137,8 @@ contract KMarkEngine is Ownable {
     int256 internal constant CONT_END = 15 hours + 20 minutes;
     int256 internal constant CLOSE_T = 15 hours + 30 minutes;
     int256 internal constant AFTER_END = 20 hours;
-    int256 internal constant AUCTION_GRACE = 60;
+    int256 internal constant AUCTION_GRACE = 5 minutes;
+    uint64 internal constant MAX_WINDOW = 15 minutes;
 
     // ─────────────────────────────── Storage ───────────────────────────────
 
@@ -287,8 +288,11 @@ contract KMarkEngine is Ownable {
         if (r.venue == VENUE_KRX) m.lastKrxAt = t;
         else m.lastNxtAt = t;
 
-        // R1 — session gate
-        (Session s, uint32 day, int256 sod) = sessionAt(t);
+        // R1 — session gate. Auction prints are judged at their print time; continuous windows by
+        // when they opened, so a window that ends exactly on a session boundary is still in session.
+        if (t - r.windowStart > MAX_WINDOW) return _reject(r, Reason.SESSION, r.vwapPx, t);
+        bool isAuction = r.kind == KIND_OPEN_AUCTION || r.kind == KIND_CLOSE_AUCTION;
+        (Session s, uint32 day, int256 sod) = sessionAt(isAuction ? t : r.windowStart);
         if (!_sessionAllows(s, sod, r.venue, r.kind)) return _reject(r, Reason.SESSION, r.vwapPx, t);
 
         // R2 — halt / volatility interruption

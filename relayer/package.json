@@ -1,0 +1,25 @@
+{
+  "name": "@k2x/relayer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "abi": "node scripts/sync-abi.mjs",
+    "replay": "tsx src/cli/replay.ts",
+    "sandbox": "tsx src/cli/sandbox.ts",
+    "keeper": "tsx src/cli/keeper.ts",
+    "status": "tsx src/cli/status.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "viem": "^2.57.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.1",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}

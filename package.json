@@ -1,0 +1,13 @@
+{
+  "name": "k2x",
+  "private": true,
+  "workspaces": [
+    "relayer",
+    "web"
+  ],
+  "scripts": {
+    "abi": "npm run abi -w @k2x/relayer",
+    "test:contracts": "cd contracts && forge test",
+    "typecheck": "npm run typecheck -w @k2x/relayer"
+  }
+}

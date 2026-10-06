@@ -162,6 +162,21 @@ contract KMarkEngineTest is EngineBase {
         _assertDecision(d, why, KMarkEngine.Decision.REJECTED, KMarkEngine.Reason.SESSION);
     }
 
+    function test_windowEndingOnTheBoundaryCountsForItsSession() public {
+        // the last pre-market minute [08:49:00, 08:50:00] still belongs to the NXT pre-market
+        KMarkEngine.Report memory r = _rep(NXT, CONT, T0728_0800 + 50 * MIN, 30, 60, 1_700_000);
+        r.windowStart = T0728_0800 + 49 * MIN;
+        (, KMarkEngine.Reason why) = engine.submit(r);
+        assertTrue(why != KMarkEngine.Reason.SESSION, "boundary window accepted into its session");
+    }
+
+    function test_overlongWindowRejected() public {
+        KMarkEngine.Report memory r = _rep(NXT, CONT, T0728_0800 + 40 * MIN, 30, 60, 1_700_000);
+        r.windowStart = T0728_0800 + 10 * MIN;
+        (KMarkEngine.Decision d, KMarkEngine.Reason why) = engine.submit(r);
+        _assertDecision(d, why, KMarkEngine.Decision.REJECTED, KMarkEngine.Reason.SESSION);
+    }
+
     function test_weekendAndHolidayAreClosed() public {
         engine.setHoliday(D1009, true);
         (KMarkEngine.Decision d, KMarkEngine.Reason why) = _send(KRX, CONT, T1009_1000, 5, 5, 1_800_000);

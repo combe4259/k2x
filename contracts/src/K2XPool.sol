@@ -93,6 +93,7 @@ contract K2XPool is ERC20, Ownable, ReentrancyGuard {
     uint256 public pendingAusd; // escrowed AUSD of pending MINT / DEPOSIT requests
     uint256 public pendingCount;
     Request[] internal _requests;
+    mapping(address => uint256[]) internal _userRequests;
 
     event Requested(
         uint256 indexed id, address indexed user, Kind kind, uint256 amountIn, uint256 minOut, uint64 seq, uint64 expiry
@@ -225,6 +226,25 @@ contract K2XPool is ERC20, Ownable, ReentrancyGuard {
         return _requests[id];
     }
 
+    function userRequests(address user) external view returns (uint256[] memory) {
+        return _userRequests[user];
+    }
+
+    /// @notice Pending request ids in [start, start + limit); used by keepers and the UI.
+    function pendingIds(uint256 start, uint256 limit) external view returns (uint256[] memory ids) {
+        uint256 end = start + limit;
+        if (end > _requests.length) end = _requests.length;
+        uint256 n;
+        for (uint256 i = start; i < end; ++i) {
+            if (_requests[i].status == Status.PENDING) ++n;
+        }
+        ids = new uint256[](n);
+        n = 0;
+        for (uint256 i = start; i < end; ++i) {
+            if (_requests[i].status == Status.PENDING) ids[n++] = i;
+        }
+    }
+
     function snapshot() external view returns (Snapshot memory s) {
         (s.px, s.priceAt, s.priceSeq, s.session, s.stale) = engine.latest(market);
         uint64 t = engine.currentTime();
@@ -263,6 +283,7 @@ contract K2XPool is ERC20, Ownable, ReentrancyGuard {
             })
         );
         ++pendingCount;
+        _userRequests[msg.sender].push(id);
         emit Requested(id, msg.sender, k, amountIn, minOut, seq, expiry);
     }
 

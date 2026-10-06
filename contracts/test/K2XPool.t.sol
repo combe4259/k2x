@@ -223,6 +223,21 @@ contract K2XPoolTest is EngineBase {
         assertEq(ausd.balanceOf(alice) - before, 1_000e6);
     }
 
+    function test_pendingIdsAndUserRequests() public {
+        _deposit(100_000e6);
+        vm.startPrank(alice);
+        pool.requestMint(1_000e6, 0, type(uint64).max);
+        pool.requestMint(2_000e6, 0, type(uint64).max);
+        vm.stopPrank();
+        uint256[] memory ids = pool.pendingIds(0, 100);
+        assertEq(ids.length, 2);
+        assertEq(pool.userRequests(alice).length, 2);
+        _price(lastPx);
+        pool.settleMany(ids);
+        assertEq(pool.pendingIds(0, 100).length, 0);
+        assertEq(pool.pendingCount(), 0);
+    }
+
     // ─────────── NAV bounds ───────────
 
     /// Within the ±30% daily limit a daily-reset 2x token can never reach zero.

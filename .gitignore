@@ -18,3 +18,8 @@ contracts/broadcast/*/31337/
 # misc
 .DS_Store
 *.log
+
+# local anvil deployments
+deployments/31337.json
+
+deployments/31337.live.json
