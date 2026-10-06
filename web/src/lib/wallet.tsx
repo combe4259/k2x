@@ -29,13 +29,15 @@ type WriteParams<abi extends Abi, fn extends ContractFunctionName<abi, "nonpayab
 type Ctx = {
   wallet: WalletState;
   busy: boolean;
-  connectDemo: () => Promise<void>;
+  connectDemo: () => Promise<Address>;
   connectInjected: () => Promise<void>;
   disconnect: () => void;
   write: <abi extends Abi, fn extends ContractFunctionName<abi, "nonpayable" | "payable">>(
     p: WriteParams<abi, fn>,
   ) => Promise<TransactionReceipt>;
   fund: () => Promise<string>;
+  /** One click: create (or reuse) the demo wallet in this browser and send it test MON and AUSD. */
+  startDemo: () => Promise<string>;
 };
 
 const WalletCtx = createContext<Ctx | null>(null);
@@ -51,19 +53,23 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [wallet, setWallet] = useState<WalletState>(null);
   const [busy, setBusy] = useState(false);
 
-  const fund = useCallback(async () => {
-    if (!wallet) throw new Error("Connect a wallet first");
+  const fundAddress = useCallback(async (address: Address) => {
     const res = await fetch("/api/faucet", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ address: wallet.address }),
+      body: JSON.stringify({ address }),
     });
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.error ?? "Faucet failed");
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error ?? "The faucet did not answer. Try again in a minute.");
     return body.message as string;
-  }, [wallet]);
+  }, []);
 
-  const connectDemo = useCallback(async () => {
+  const fund = useCallback(async () => {
+    if (!wallet) throw new Error("Connect a wallet first");
+    return fundAddress(wallet.address);
+  }, [wallet, fundAddress]);
+
+  const connectDemo = useCallback(async (): Promise<Address> => {
     let key: `0x${string}` | null = null;
     try {
       key = localStorage.getItem(DEMO_KEY) as `0x${string}` | null;
@@ -80,7 +86,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     try {
       localStorage.setItem("k2x.wallet", "demo");
     } catch {}
+    return account.address;
   }, []);
+
+  const startDemo = useCallback(async () => {
+    const address = wallet?.address ?? (await connectDemo());
+    return fundAddress(address);
+  }, [wallet, connectDemo, fundAddress]);
 
   const connectInjected = useCallback(async () => {
     const eth = window.ethereum;
@@ -149,7 +161,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <WalletCtx.Provider value={{ wallet, busy, connectDemo, connectInjected, disconnect, write, fund }}>
+    <WalletCtx.Provider value={{ wallet, busy, connectDemo, connectInjected, disconnect, write, fund, startDemo }}>
       {children}
     </WalletCtx.Provider>
   );

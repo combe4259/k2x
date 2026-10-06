@@ -34,4 +34,5 @@ writeFileSync(join(out, "sandbox.json"), JSON.stringify(sandbox));
 writeFileSync(join(out, "deployment.json"), JSON.stringify({ chainId, base, live }, null, 1));
 writeFileSync(join(out, "replays.json"), JSON.stringify(replays));
 writeFileSync(join(out, "datasets.json"), JSON.stringify(datasets));
+writeFileSync(join(out, "proof.json"), JSON.stringify(read(join(root, "data", "proof", `${chainId}.json`)) ?? { chainId, rows: [] }));
 console.log(`generated config for chain ${chainId}: base=${!!base} live=${!!live} replays=${Object.keys(replays).join(",") || "none"}`);

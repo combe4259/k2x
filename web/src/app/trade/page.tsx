@@ -5,11 +5,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { erc20Abi, formatUnits, parseEventLogs, parseUnits, type Address, type TransactionReceipt } from "viem";
 import { k2xPoolAbi, kmarkEngineAbi } from "@k2x/relayer";
 import { SessionBand } from "@/components/SessionBand";
-import { AssetSwitch, InstanceSwitch } from "@/components/Switches";
+import { AssetSwitch } from "@/components/Switches";
 import { publicClient, sleep, type RefundReason } from "@/lib/client";
 import { ASSETS, AUSD, INSTANCES, txUrl, type AssetKey, type InstanceKey } from "@/lib/config";
 import {
-  defaultInstance,
   knownRefundReason,
   lookupRefundReason,
   notePending,
@@ -19,6 +18,7 @@ import {
 } from "@/lib/data";
 import { SESSION_TEXT, ausd6, dirClass, kstClock, kstDate, krw, pct, units18 } from "@/lib/format";
 import { useNow, usePoll } from "@/lib/hooks";
+import { MODE_LABEL, useMode } from "@/lib/mode";
 import { kstParts, nextOpen } from "@/lib/session";
 import { useWallet } from "@/lib/wallet";
 
@@ -46,7 +46,7 @@ function Trade() {
   const params = useSearchParams();
   const router = useRouter();
   const asset = (params.get("asset") as AssetKey) || "hynix";
-  const instance = ((params.get("instance") as InstanceKey) || defaultInstance) as InstanceKey;
+  const { instance, mode } = useMode();
   const set = (k: string, v: string) => {
     const p = new URLSearchParams(params.toString());
     p.set(k, v);
@@ -71,20 +71,24 @@ function Trade() {
     <div className="pt-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="eyebrow">Mint & redeem · {inst.label}</p>
-          <h1 className="display mt-2 text-4xl font-bold">{a.symbol}</h1>
-          <p className="mt-1 text-sm text-ink-2">
-            2x {a.name} ({a.ko}, {a.code}) · no liquidation · resets to 2x at each 15:30 KRX close
+          <p className="eyebrow">
+            Mint & redeem · {MODE_LABEL[mode]} · 2x {a.name} ({a.ko})
+          </p>
+          <h1 className="display mt-2 text-4xl font-bold">Mint or redeem {a.symbol}</h1>
+          <p className="mt-2 max-w-2xl text-ink-2">
+            You choose the amount. The price is the first one K-Mark trusts after your request, not the one on screen now.
+            {instance === "live"
+              ? " Outside Korean hours, your request waits for the next session."
+              : " On the replay day the market moves a minute when you send a request, so you see it fill right away."}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <InstanceSwitch value={instance} onChange={(v) => set("instance", v)} />
           <AssetSwitch value={asset} onChange={(v) => set("asset", v)} />
         </div>
       </div>
 
       <div className="mt-6">
-        <SessionBand now={clock} clockLabel={instance === "live" ? "KST" : "Sandbox clock"} />
+        <SessionBand now={clock} clockLabel={instance === "live" ? "KST" : "Replay-day clock (2 Oct session)"} />
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-[1.1fr_1fr]">
@@ -134,20 +138,28 @@ function Line({ k, v, cls = "", big = false }: { k: string; v: string; cls?: str
   );
 }
 
-type Step = { ok: true; virtualTime: number } | { ok: false; busy: boolean; error: string };
+type Step = { ok: true; virtualTime: number } | { ok: false; busy: boolean; error: string; retryIn?: number };
 
-/** Move the sandbox market. Never throws: a timed-out step comes back as an HTML 504 page, not JSON. */
-async function stepSandbox(minutes: number): Promise<Step> {
+/** Move the replay day. Never throws: a timed-out step comes back as an HTML 504 page, not JSON. */
+async function stepOnce(minutes: number): Promise<Step> {
   try {
     const res = await fetch("/api/sandbox/step", { method: "POST", body: JSON.stringify({ minutes }) });
-    const body = (await res.json().catch(() => null)) as { error?: string; virtualTime?: number } | null;
+    const body = (await res.json().catch(() => null)) as { error?: string; virtualTime?: number; retryIn?: number } | null;
     if (res.ok && typeof body?.virtualTime === "number") return { ok: true, virtualTime: body.virtualTime };
-    if (res.status === 429) return { ok: false, busy: true, error: "Someone else is moving the sandbox market right now." };
-    if (body?.error) return { ok: false, busy: false, error: `The sandbox could not move: ${body.error}.` };
-    return { ok: false, busy: false, error: `The sandbox step did not finish (HTTP ${res.status}); the market may have moved part of the way.` };
+    if (res.status === 429) return { ok: false, busy: true, error: body?.error ?? "The replay day is moving right now.", retryIn: body?.retryIn };
+    if (body?.error) return { ok: false, busy: false, error: `The replay day could not move: ${body.error}.` };
+    return { ok: false, busy: false, error: `The replay day did not finish moving (HTTP ${res.status}); it may have moved part of the way.` };
   } catch {
-    return { ok: false, busy: false, error: "Could not reach the sandbox server." };
+    return { ok: false, busy: false, error: "Could not reach the server." };
   }
+}
+
+/** Move the replay day, waiting out the shared pace limit once if someone else just moved it. */
+async function stepSandbox(minutes: number): Promise<Step> {
+  const first = await stepOnce(minutes);
+  if (first.ok || !first.busy) return first;
+  await sleep(((first.retryIn ?? 5) + 1) * 1000);
+  return stepOnce(minutes);
 }
 
 /** The id from the pool's Requested event in a request receipt. */
@@ -173,7 +185,8 @@ function ActionPanel({
   clock: number;
   onDone: () => void;
 }) {
-  const { wallet, write, busy, connectDemo, fund } = useWallet();
+  const { wallet, write, busy, fund, startDemo } = useWallet();
+  const { completeDemo } = useMode();
   const [mode, setMode] = useState<"mint" | "redeem">("mint");
   const [amount, setAmount] = useState("1000");
   const [tolPick, setTolPick] = useState<number>();
@@ -225,7 +238,10 @@ function ActionPanel({
           args: [market, r.settledSeq],
         });
         const out = r.kind === 0 ? `${units18(r.amountOut, 4)} ${symbol}` : `${ausd6(r.amountOut)} AUSD`;
-        return { text: `Settled at ${krw(p.px)} KRW: ${out}.` };
+        if (r.kind === 0) completeDemo("mint");
+        return {
+          text: `You asked while price #${r.seq} was the latest. You got price #${r.settledSeq}: ${krw(p.px)} KRW at ${kstClock(Number(p.at))}, set after you asked → ${out}.`,
+        };
       }
       if (r.status === 3) {
         const reason = await lookupRefundReason({ instance, pool, market, id, request: r });
@@ -235,9 +251,9 @@ function ActionPanel({
         };
       }
     }
-    if (step.ok) return { text: `The sandbox moved to ${kstClock(step.virtualTime)}, but ${waiting}.` };
+    if (step.ok) return { text: `The replay day moved to ${kstClock(step.virtualTime)}, but ${waiting}.` };
     if (step.busy) return { text: `${step.error} Until it finishes, ${waiting}.` };
-    return { text: `${step.error} Your request is still waiting; try moving the sandbox market again.`, error: true };
+    return { text: `${step.error} Your request is still waiting; try moving the replay day again.`, error: true };
   }
 
   async function submit() {
@@ -273,7 +289,7 @@ function ActionPanel({
       setMsg({ text: "Requested. It settles at the next trusted price.", tx });
       if (instance === "sandbox") {
         setStepping(true);
-        setMsg({ text: "Requested. Moving the sandbox market one minute…", tx });
+        setMsg({ text: "Requested. Moving the replay day one minute…", tx });
         const step = await stepSandbox(1);
         const outcome = await afterStep(id, step).catch((e: Error) => ({
           text: `Requested, but its status could not be read (${e.message.split("\n")[0]}). Check your requests below.`,
@@ -291,10 +307,10 @@ function ActionPanel({
 
   async function moveSandbox() {
     setStepping(true);
-    setMsg({ text: "Moving the sandbox market 5 minutes…" });
+    setMsg({ text: "Moving the replay day 3 minutes…" });
     try {
-      const step = await stepSandbox(5);
-      if (step.ok) setMsg({ text: `Sandbox moved to ${kstClock(step.virtualTime)}.` });
+      const step = await stepSandbox(3);
+      if (step.ok) setMsg({ text: `The replay day moved to ${kstClock(step.virtualTime)}.` });
       else if (step.busy) setMsg({ text: `${step.error} Try again in a moment.` });
       else setMsg({ text: step.error, error: true });
     } finally {
@@ -369,8 +385,15 @@ function ActionPanel({
 
       <div className="mt-5 flex flex-wrap gap-2">
         {!wallet ? (
-          <button onClick={() => connectDemo()} className="rounded-md bg-ink px-4 py-2.5 text-sm font-medium text-sheet">
-            Use demo wallet
+          <button
+            onClick={() =>
+              startDemo()
+                .then((m) => (setMsg({ text: m }), completeDemo("fund")))
+                .catch((e) => setMsg({ text: e.message, error: true }))
+            }
+            className="rounded-md bg-ink px-4 py-2.5 text-sm font-medium text-sheet"
+          >
+            Get test money to start
           </button>
         ) : (
           <>
@@ -382,7 +405,7 @@ function ActionPanel({
               {busy
                 ? "Waiting for Monad…"
                 : stepping
-                  ? "Moving the sandbox…"
+                  ? "Moving the replay day…"
                   : mode === "mint"
                     ? "Request mint"
                     : "Request redeem"}
@@ -414,7 +437,7 @@ function ActionPanel({
           className="mt-4 text-xs text-ink-2 underline disabled:no-underline disabled:opacity-50"
           onClick={moveSandbox}
         >
-          {stepping ? "Moving the sandbox market…" : "Move the sandbox market 5 minutes"}
+          {stepping ? "Moving the replay day…" : "Move the replay day 3 minutes"}
         </button>
       )}
     </section>

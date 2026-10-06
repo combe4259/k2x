@@ -7,6 +7,7 @@ import { Stamp } from "@/components/Stamp";
 import { VerdictTape, toTape } from "@/components/VerdictTape";
 import { CHAIN_ID, txUrl } from "@/lib/config";
 import { dirClass, kstClock, krw, pct } from "@/lib/format";
+import { useMode } from "@/lib/mode";
 import datasets from "@/generated/datasets.json";
 import replays from "@/generated/replays.json";
 
@@ -38,6 +39,7 @@ export default function ReplayPage() {
 
   const [cursor, setCursor] = useState(span[0]);
   const [playing, setPlaying] = useState(false);
+  const { completeDemo } = useMode();
   useEffect(() => {
     setCursor(span[0]);
     setPlaying(false);
@@ -50,13 +52,14 @@ export default function ReplayPage() {
       setCursor((c) => {
         if (c + step >= span[1]) {
           setPlaying(false);
+          completeDemo("watch");
           return span[1];
         }
         return c + step;
       });
     }, zoom === "open" ? 220 : 120);
     return () => clearInterval(t);
-  }, [playing, zoom, span]);
+  }, [playing, zoom, span, completeDemo]);
 
   const raw = events.filter((e): e is Extract<EngineEvent, { type: "raw" }> => e.type === "raw");
   const accepted = events.filter((e): e is Extract<EngineEvent, { type: "accepted" }> => e.type === "accepted");
@@ -84,11 +87,15 @@ export default function ReplayPage() {
 
   return (
     <div className="pt-10">
-      <p className="eyebrow">Incident replay · recorded on {CHAIN_ID === 10143 ? "Monad testnet" : "a local chain"}</p>
-      <h1 className="display mt-3 text-4xl font-bold leading-tight sm:text-5xl">One share at the open.</h1>
+      <p className="eyebrow">The 7/28 print · recorded on {CHAIN_ID === 10143 ? "Monad testnet" : "a local chain"}</p>
+      <h1 className="display mt-3 text-4xl font-bold leading-tight sm:text-5xl">One share at −30%. Rejected.</h1>
       <p className="mt-4 max-w-2xl text-ink-2">
-        The same NXT pre-market tape fed to two price layers. On the left, an oracle that passes every print through. On
-        the right, K-Mark&apos;s verdicts, each one a Monad transaction.
+        The 28 July SK hynix pre-market, fed to two price layers: an oracle that takes every trade, and K-Mark. Every K-Mark
+        verdict below is a transaction on Monad. Press Play.
+      </p>
+      <p className="mt-2 max-w-2xl text-xs text-ink-3">
+        Observed: the {key === "2026-07-28_000660" ? "1-share" : "11-share"} print, the previous close and the KRX open.
+        Reconstructed (and labelled in the data): the trades between them.
       </p>
 
       <div className="mt-8 flex flex-wrap items-center gap-2">
@@ -167,7 +174,7 @@ export default function ReplayPage() {
 
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <div className="card p-5">
-          <div className="eyebrow">Pass-through oracle</div>
+          <div className="eyebrow">An oracle that takes every trade</div>
           <Row label="Price now" value={naiveNow ? krw(naiveNow) : "—"} move={naiveNow ? naiveNow / prevClose - 1 : 0} />
           <Row label="Lowest price used" value={isFinite(naiveLow) ? krw(naiveLow) : "—"} move={isFinite(naiveLow) ? naiveLow / prevClose - 1 : 0} />
           <Row
@@ -185,6 +192,11 @@ export default function ReplayPage() {
           <div className="eyebrow">K-Mark</div>
           <Row label="Trusted price now" value={trustedNow ? krw(trustedNow) : "waiting"} move={trustedNow ? trustedNow / prevClose - 1 : 0} />
           <Row label="Lowest trusted price" value={isFinite(trustedLow) ? krw(trustedLow) : "—"} move={isFinite(trustedLow) ? trustedLow / prevClose - 1 : 0} />
+          <Row
+            label="2x token marked at that price"
+            value={isFinite(trustedLow) ? pct(2 * (trustedLow / prevClose - 1), 1) : "—"}
+            move={isFinite(trustedLow) ? trustedLow / prevClose - 1 : 0}
+          />
           <div className="mt-3 flex items-center justify-between gap-3 text-sm">
             <span className="text-ink-2">The {key === "2026-07-28_000660" ? "1-share" : "11-share"} print</span>
             {badPrint && rejectedAt <= cursor ? (
@@ -204,7 +216,7 @@ export default function ReplayPage() {
           </div>
           <p className="mt-4 border-t border-rule pt-3 text-sm text-ink-2">
             {firstTrusted
-              ? `The real gap was trusted ${firstTrusted.at - t0} seconds after the open, once ₩3억 traded near the new level. A time-window patch would have ignored it for ten minutes.`
+              ? `The real gap was trusted ${firstTrusted.at - t0} seconds after the open, once ₩300M and 20 trades went through near the new level. A patch that ignores the first ten minutes would have ignored it too.`
               : onchain
                 ? "Waiting for the on-chain replay."
                 : "This scenario has not been replayed on this network."}

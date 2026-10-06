@@ -21,7 +21,7 @@ let running: Promise<unknown> | null = null;
 export async function POST(req: Request) {
   const { minutes = 1 } = (await req.json().catch(() => ({}))) as { minutes?: number };
   const steps = Math.max(1, Math.min(3, Math.floor(minutes)));
-  if (running) return NextResponse.json({ error: "The sandbox market is moving. Try again in a moment." }, { status: 429 });
+  if (running) return NextResponse.json({ error: "The replay day is moving. Try again in a moment." }, { status: 429 });
   try {
     const clients = signerClients();
     const { publicClient } = clients;
@@ -37,7 +37,7 @@ export async function POST(req: Request) {
       const wait = PACE_SECONDS - Number(latest.timestamp - last.timestamp);
       if (wait > 0) {
         return NextResponse.json(
-          { error: `The sandbox market moved ${PACE_SECONDS - wait}s ago. It moves at most once every ${PACE_SECONDS}s.`, retryIn: wait },
+          { error: `The replay day moved ${PACE_SECONDS - wait}s ago; it moves at most once every ${PACE_SECONDS}s.`, retryIn: wait },
           { status: 429 },
         );
       }

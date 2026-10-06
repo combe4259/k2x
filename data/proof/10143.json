@@ -1,0 +1,55 @@
+{
+ "chainId": 10143,
+ "rows": [
+  {
+   "what": "A price outside the ±30% daily limit",
+   "result": "REJECTED · BAND",
+   "tx": "0x795ed1ea68b9af1fc8bbfcec4a65130c3fd89cf0a7533a2b15f754025d48cab3",
+   "block": 68693467,
+   "note": "2,400,000 KRW vs a 2,360,800 upper limit"
+  },
+  {
+   "what": "A closing auction whose official close differs from its band-checked price",
+   "result": "REJECTED · MALFORMED",
+   "tx": "0x3011b31587ceb761802b68a6078dec1ddb7f34be3009c90dda1a781e3b78e170",
+   "block": 68693470,
+   "note": "lastPx 18,500,000 vs vwap 1,850,000"
+  },
+  {
+   "what": "A report dated an hour in the future",
+   "result": "REJECTED · FUTURE_TIMESTAMP",
+   "tx": "0x762a67607b18747ce537abb7ae38b2d907cf16e0d9a21cf8bb45b3b64d437d3e",
+   "block": 68693475,
+   "note": "sent by the live relayer key itself"
+  },
+  {
+   "what": "Mint requested on the replay day (price #3 on screen)",
+   "result": "REQUESTED · 1,000 AUSD",
+   "tx": "0xb9663c3c8249c5d080a45f20928cf77a62c9ad7f0aa4fc0a9a2e8799e9ca0fbb",
+   "block": 68693481
+  },
+  {
+   "what": "…settled at the first price formed after the request",
+   "result": "SETTLED · price #4 = 1,825,139 KRW",
+   "tx": "0x48454af426e2cdd906c245fe480eed44bd6b748c02b57d343e1439d171981f76",
+   "block": 68693495
+  },
+  {
+   "what": "A mint asking for more tokens than the price allows",
+   "result": "REFUNDED · SLIPPAGE",
+   "tx": "0x48454af426e2cdd906c245fe480eed44bd6b748c02b57d343e1439d171981f76",
+   "block": 68693495
+  },
+  {
+   "what": "Mint requested while Korea is closed (live)",
+   "result": "QUEUED · waits for the next session",
+   "tx": "0xed7f5bb3d83059d3bae120dbd34ec26ce8fc5570735baf7e432a680bedf3a560",
+   "block": 68693505
+  }
+ ],
+ "pending": {
+  "pool": "0x564C6e2B8Fc23fca351E7201BD4eC992a07dD003",
+  "id": "1",
+  "requestTx": "0xed7f5bb3d83059d3bae120dbd34ec26ce8fc5570735baf7e432a680bedf3a560"
+ }
+}

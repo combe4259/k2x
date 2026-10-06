@@ -3,15 +3,15 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { useMode } from "@/lib/mode";
 import { useWallet } from "@/lib/wallet";
 
 const NAV = [
-  { href: "/", label: "Live" },
-  { href: "/replay", label: "Replay 7/28" },
+  { href: "/replay", label: "The 7/28 print" },
   { href: "/trade", label: "Mint & redeem" },
-  { href: "/pool", label: "LP pool" },
-  { href: "/engine", label: "Engine" },
-  { href: "/simulator", label: "Risk simulator" },
+  { href: "/pool", label: "Pool" },
+  { href: "/engine", label: "Price log" },
+  { href: "/simulator", label: "What 2x does" },
 ];
 
 export function Header() {
@@ -21,11 +21,11 @@ export function Header() {
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
         <Link href="/" className="flex items-baseline gap-2">
           <span className="display text-xl font-bold">K2X</span>
-          <span className="eyebrow hidden sm:inline">K-Mark engine</span>
+          <span className="eyebrow hidden sm:inline">2x Korea · no liquidation</span>
         </Link>
         <nav className="order-3 -mx-1 flex w-full gap-1 overflow-x-auto text-sm sm:order-none sm:w-auto">
           {NAV.map((n) => {
-            const active = n.href === "/" ? path === "/" : path.startsWith(n.href);
+            const active = path.startsWith(n.href);
             return (
               <Link
                 key={n.href}
@@ -46,15 +46,33 @@ export function Header() {
 }
 
 function WalletButton() {
-  const { wallet, connectDemo, connectInjected, disconnect, fund } = useWallet();
+  const { wallet, connectInjected, disconnect, fund, startDemo } = useWallet();
+  const { completeDemo } = useMode();
   const [open, setOpen] = useState(false);
   const [msg, setMsg] = useState<string>();
+  const [starting, setStarting] = useState(false);
 
   if (!wallet) {
     return (
-      <div className="flex gap-2">
-        <button onClick={() => connectDemo()} className="rounded-md bg-ink px-3 py-1.5 text-sm font-medium text-sheet">
-          Use demo wallet
+      <div className="flex items-center gap-2">
+        {msg && <span className="hidden max-w-56 truncate text-xs text-ink-2 md:inline">{msg}</span>}
+        <button
+          disabled={starting}
+          title="Creates a test wallet in this browser and sends test MON and 10,000 test AUSD. They have no value."
+          onClick={async () => {
+            setStarting(true);
+            try {
+              setMsg(await startDemo());
+              completeDemo("fund");
+            } catch (e) {
+              setMsg((e as Error).message);
+            } finally {
+              setStarting(false);
+            }
+          }}
+          className="rounded-md bg-ink px-3 py-1.5 text-sm font-medium text-sheet disabled:opacity-60"
+        >
+          {starting ? "Sending test money…" : "Get test money"}
         </button>
         <button
           onClick={() => connectInjected().catch((e) => alert(e.message))}

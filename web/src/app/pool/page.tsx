@@ -1,13 +1,15 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { erc20Abi, parseUnits } from "viem";
 import { k2xPoolAbi } from "@k2x/relayer";
-import { AssetSwitch, InstanceSwitch } from "@/components/Switches";
+import { AssetSwitch } from "@/components/Switches";
 import { publicClient } from "@/lib/client";
 import { ASSETS, AUSD, INSTANCES, txUrl, type AssetKey, type InstanceKey } from "@/lib/config";
-import { defaultInstance, requestExpiry, useSnapshot } from "@/lib/data";
+import { requestExpiry, useSnapshot } from "@/lib/data";
+import { usePoll } from "@/lib/hooks";
+import { MODE_LABEL, useMode } from "@/lib/mode";
 import { pct, usd18 } from "@/lib/format";
 import { useWallet } from "@/lib/wallet";
 
@@ -27,13 +29,29 @@ function Pool() {
   const params = useSearchParams();
   const router = useRouter();
   const asset = (params.get("asset") as AssetKey) || "hynix";
-  const instance = ((params.get("instance") as InstanceKey) || defaultInstance) as InstanceKey;
+  const { instance, mode, completeDemo } = useMode();
+  const poolAddr = INSTANCES[instance]!.pools[asset];
+  // AUSD escrowed by requests that wait for their price (e.g. the seed deposit before the first trusted price)
+  const { data: pending } = usePoll(
+    () => publicClient.readContract({ address: poolAddr, abi: k2xPoolAbi, functionName: "pendingAusd" }),
+    5000,
+    [poolAddr],
+  );
   const set = (k: string, v: string) => {
     const p = new URLSearchParams(params.toString());
     p.set(k, v);
     router.replace(`/pool?${p.toString()}`);
   };
   const { data: s, refresh } = useSnapshot(instance, asset, 2500);
+  const { wallet } = useWallet();
+  useEffect(() => completeDemo("pool"), [completeDemo]);
+  const tokenAddr = INSTANCES[instance]!.tokens[asset];
+  const { data: mine } = usePoll(
+    async () => (wallet ? publicClient.readContract({ address: tokenAddr, abi: erc20Abi, functionName: "balanceOf", args: [wallet.address] }) : 0n),
+    5000,
+    [wallet?.address, tokenAddr],
+  );
+  const mineUsd = s && mine ? (Number(mine) / 1e18) * (Number(s.nav) / 1e18) : 0;
   const equity = s ? Number(s.equity) / 1e18 : 0;
   const exposure = s ? Number(s.exposure) / 1e18 : 0;
   const liabilities = s ? Number(s.liabilities) / 1e18 : 0;
@@ -46,14 +64,22 @@ function Pool() {
     <div className="pt-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="eyebrow">LP pool · counterparty to {ASSETS[asset].symbol}</p>
-          <h1 className="display mt-2 text-4xl font-bold">What the pool can lose today</h1>
+          <p className="eyebrow">
+            Pool · {MODE_LABEL[mode]} · counterparty to {ASSETS[asset].symbol}
+          </p>
+          <h1 className="display mt-2 text-4xl font-bold">The pool on the other side</h1>
         </div>
         <div className="flex flex-wrap gap-2">
-          <InstanceSwitch value={instance} onChange={(v) => set("instance", v)} />
           <AssetSwitch value={asset} onChange={(v) => set("asset", v)} />
         </div>
       </div>
+      {s && s.lpSupply === 0n && (pending ?? 0n) > 0n && (
+        <p className="mt-4 rounded-md bg-tint p-3 text-sm text-ink-2">
+          Not priced yet: <span className="num">{(Number(pending) / 1e6).toLocaleString("en-US")}</span> AUSD is deposited and
+          waiting for the first trusted price{instance === "live" ? " after the Korean market opens" : ""}. Until then the pool
+          has no settled equity, so the figures below read zero.
+        </p>
+      )}
       <p className="mt-3 max-w-2xl text-ink-2">
         Token holders&apos; claims come first; LPs own what is left. The pool loses when the stock rises, and the most it
         can rise today is to its +30% daily limit. New mints stop once that move would cost LPs {MINT_CAP * 100}% of their
@@ -63,7 +89,11 @@ function Pool() {
 
       <section className="mt-6 grid gap-4 md:grid-cols-4">
         <Stat label="LP equity" value={`$${usd18(s?.equity ?? 0n)}`} sub={`share price ${sharePrice.toFixed(4)} AUSD`} />
-        <Stat label="Owed to holders" value={`$${usd18(s?.liabilities ?? 0n)}`} sub="token supply × NAV" />
+        <Stat
+          label="Owed to holders"
+          value={`$${usd18(s?.liabilities ?? 0n)}`}
+          sub={mineUsd > 0 ? `token supply × NAV · $${mineUsd.toLocaleString("en-US", { maximumFractionDigits: 2 })} of it is yours` : "token supply × NAV"}
+        />
         <Stat label="Stock exposure" value={`$${usd18(s?.exposure ?? 0n)}`} sub="how much stock the pool is effectively short" />
         <Stat label="Funding rate" value={pct(apr, 2)} sub="a year, paid by holders to LPs" />
       </section>
