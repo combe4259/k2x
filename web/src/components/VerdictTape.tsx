@@ -68,6 +68,11 @@ export function toTape(events: EngineEvent[]): TapeRow[] {
   return rows.sort((a, b) => b.at - a.at || (a.key.endsWith("-cand") ? 1 : -1));
 }
 
+/** ₩1.16B, ₩560M: notional in units an English reader knows. */
+function krwShort(v: number) {
+  return v >= 1e9 ? `₩${(v / 1e9).toFixed(2)}B` : `₩${Math.round(v / 1e6).toLocaleString()}M`;
+}
+
 export function VerdictTape({
   rows,
   reference,
@@ -99,7 +104,7 @@ export function VerdictTape({
               <span className={`num text-sm ${reference ? dirClass(move) : ""}`}>{krw(r.px)}</span>
               {reference ? <span className={`num ml-2 text-xs ${dirClass(move)}`}>{pct(move, 1)}</span> : null}
               <span className="block truncate text-xs text-ink-3">
-                {r.note ?? (r.kind ? KIND[r.kind] : `${r.trades.toLocaleString()} trades · ₩${(r.notional / 1e8).toFixed(1)}억`)}
+                {r.note ?? (r.kind ? KIND[r.kind] : `${r.trades.toLocaleString()} trades · ${krwShort(r.notional)}`)}
                 {r.reason !== "NONE" ? ` · ${REASON_TEXT[r.reason] ?? r.reason}` : ""}
               </span>
             </span>
