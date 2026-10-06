@@ -5,7 +5,7 @@ import { deployment, operatorClients } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
 
-const GAS_DRIP = parseEther("0.3");
+const GAS_DRIP = parseEther("0.1");
 const recent = new Map<string, number>();
 
 /** Gives a wallet enough testnet MON for a few transactions and 10,000 mock AUSD. */
